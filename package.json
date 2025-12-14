@@ -12,7 +12,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "lucide-react": "^0.344.0",
-    "@google/genai": "^0.1.1",
+    "@google/genai": "latest",
     "recharts": "^2.12.2",
     "clsx": "^2.1.0",
     "tailwind-merge": "^2.2.1"
