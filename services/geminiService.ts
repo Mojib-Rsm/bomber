@@ -27,7 +27,7 @@ export const generateMessageTemplate = async (
       contents: prompt,
     });
 
-    return response.text.trim();
+    return response.text?.trim() || "Error: No content generated.";
   } catch (error) {
     console.error("Error generating template:", error);
     return "Error generating template. Please try again or check your API key.";
