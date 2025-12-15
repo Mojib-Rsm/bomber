@@ -324,6 +324,7 @@ export default function App() {
             apiNodes={apiNodes} 
             disabledNodes={disabledNodes} 
             currentUser={currentUser}
+            logs={logs}
             toggleNode={handleToggleNode} 
             onUpdateNode={handleUpdateNode}
             onAddNode={handleAddNode}
