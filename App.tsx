@@ -355,6 +355,7 @@ export default function App() {
           <Profile 
             logs={logs} 
             contacts={[]} 
+            currentUser={currentUser}
             onClearLogs={handleClearLogs} 
             onClearContacts={handleClearContacts}
             onNavigate={setCurrentView}

@@ -1,16 +1,17 @@
 import React from 'react';
-import { LogEntry, Contact, AppView } from '../types';
+import { LogEntry, Contact, AppView, UserProfile } from '../types';
 import { User, Trash2, Activity, Zap, Send, MessageCircle, ShieldAlert } from 'lucide-react';
 
 interface ProfileProps {
   logs: LogEntry[];
   contacts: Contact[];
+  currentUser?: UserProfile | null;
   onClearLogs: () => void;
   onClearContacts: () => void;
   onNavigate: (view: AppView) => void;
 }
 
-const Profile: React.FC<ProfileProps> = ({ logs, onClearLogs, onNavigate }) => {
+const Profile: React.FC<ProfileProps> = ({ logs, currentUser, onClearLogs, onNavigate }) => {
   const totalAttacks = logs.length;
   const successful = logs.filter(l => l.status === 'sent').length;
   const rate = totalAttacks > 0 ? Math.round((successful / totalAttacks) * 100) : 0;
@@ -35,19 +36,24 @@ const Profile: React.FC<ProfileProps> = ({ logs, onClearLogs, onNavigate }) => {
           <div className="w-16 h-16 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center relative">
              <User className="w-8 h-8 text-zinc-400" />
              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-black rounded-full flex items-center justify-center border border-zinc-800">
-                <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full"></div>
+                <div className={`w-2.5 h-2.5 rounded-full ${currentUser?.role === 'admin' ? 'bg-red-500' : 'bg-emerald-500'}`}></div>
              </div>
           </div>
           <div className="flex-1">
-             <h2 className="text-xl font-bold text-white">Administrator</h2>
-             <span className="text-xs text-zinc-500 font-mono-code">ID: 8823-ALPHA</span>
+             <h2 className="text-xl font-bold text-white">{currentUser?.username || 'User'}</h2>
+             <span className="text-xs text-zinc-500 font-mono-code uppercase">{currentUser?.role || 'Operative'} ID: {currentUser?.uid?.slice(-6) || 'N/A'}</span>
           </div>
-          <button 
-             onClick={() => onNavigate(AppView.ADMIN)}
-             className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 hover:bg-red-500 hover:text-white transition-all"
-          >
-             <ShieldAlert className="w-5 h-5" />
-          </button>
+          
+          {/* Show Admin Button ONLY if user is admin */}
+          {currentUser?.role === 'admin' && (
+             <button 
+                onClick={() => onNavigate(AppView.ADMIN)}
+                className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 hover:bg-red-500 hover:text-white transition-all"
+                title="Admin Console"
+             >
+                <ShieldAlert className="w-5 h-5" />
+             </button>
+          )}
        </div>
 
        {/* Stats Grid */}

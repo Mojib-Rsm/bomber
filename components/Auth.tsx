@@ -34,7 +34,7 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
       }
 
       if (view === AppView.REGISTER) {
-        // DIRECT DATABASE REGISTRATION (No Firebase Auth Provider)
+        // DIRECT DATABASE REGISTRATION
         
         // 1. Check if user already exists
         const usersRef = collection(db, "users");
@@ -46,17 +46,17 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
         }
 
         // 2. Create new user document
-        // We generate a custom ID or let Firestore generate it. Here we let Firestore generate it for simplicity 
-        // but to keep 'uid' consistent, we'll generate one manually or use the doc ID.
-        // Let's use a timestamp based ID for simplicity in this custom auth.
         const newUid = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // AUTO-ADMIN LOGIC: If email starts with 'admin', assign admin role
+        const isAdmin = formData.email.toLowerCase().startsWith('admin');
 
         const newUserProfile: any = {
             uid: newUid,
             username: formData.username,
             email: formData.email,
-            password: formData.password, // Storing password in DB as requested (Note: Not secure for production)
-            role: 'user',
+            password: formData.password, // Storing password in DB as requested
+            role: isAdmin ? 'admin' : 'user',
             createdAt: serverTimestamp()
         };
 
@@ -67,15 +67,14 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
             uid: newUid,
             username: formData.username,
             email: formData.email,
-            role: 'user',
-            createdAt: new Date().toISOString() // Approximate for local state
+            role: isAdmin ? 'admin' : 'user',
+            createdAt: new Date().toISOString()
         };
         onLoginSuccess(safeProfile);
 
       } else {
         // DIRECT DATABASE LOGIN
         const usersRef = collection(db, "users");
-        // Query by email
         const q = query(usersRef, where("email", "==", formData.email));
         const querySnapshot = await getDocs(q);
 
@@ -83,7 +82,6 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
             throw new Error("User not found.");
         }
 
-        // Check password (client-side check of retrieved doc - insecure but requested 'direct database' method)
         let foundUser: any = null;
         querySnapshot.forEach((doc) => {
             const data = doc.data();
@@ -170,7 +168,7 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
                       value={formData.email}
                       onChange={e => setFormData({...formData, email: e.target.value})}
                       className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
-                      placeholder="secure@netstrike.io"
+                      placeholder={view === AppView.REGISTER ? "admin@netstrike.local (for admin)" : "secure@netstrike.io"}
                   />
                 </div>
              </div>
