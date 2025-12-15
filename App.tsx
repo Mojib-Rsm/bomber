@@ -89,7 +89,7 @@ const MainLayout = ({
           className="flex items-center gap-2 cursor-pointer group"
         >
             <div className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`}></div>
-            <h1 className="text-lg font-bold font-display tracking-wide text-white">NETSTRIKE <span className="text-[9px] text-zinc-600 font-mono-code align-top">LOCAL</span></h1>
+            <h1 className="text-lg font-bold font-display tracking-wide text-white">NETSTRIKE <span className="text-[9px] text-zinc-600 font-mono-code align-top">CLOUD</span></h1>
         </div>
         
         <div className="flex items-center gap-3">
@@ -204,10 +204,10 @@ function AppContent() {
       });
 
       // Session/History Sync
+      // Removed orderBy to avoid index requirement issues on fresh Firestore instances
       const qSessions = query(
           collections.sessions(db), 
-          where("userId", "==", currentUser.uid), 
-          orderBy("lastUpdate", "desc")
+          where("userId", "==", currentUser.uid)
       );
       const unsubSessions = onSnapshot(qSessions, (snapshot) => {
           const sessions = snapshot.docs.map(doc => ({
@@ -216,6 +216,9 @@ function AppContent() {
               startTime: doc.data().startTime?.toDate ? doc.data().startTime.toDate() : new Date(doc.data().startTime || Date.now()),
               lastUpdate: doc.data().lastUpdate?.toDate ? doc.data().lastUpdate.toDate() : new Date(doc.data().lastUpdate || Date.now()),
           } as ActiveSession));
+          
+          // Client-side sort
+          sessions.sort((a, b) => b.lastUpdate.getTime() - a.lastUpdate.getTime());
           setUserSessions(sessions);
       });
 
