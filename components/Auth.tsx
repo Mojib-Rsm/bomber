@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
-import { AppView } from '../types';
+import { AppView, UserProfile } from '../types';
 import { Lock, User, Mail, ArrowRight, Loader2, Key, AlertCircle, HardDrive, ShieldAlert } from 'lucide-react';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore"; 
-import { auth, db, isFirebaseConfigured } from '../firebase';
+import { doc, setDoc, serverTimestamp, collection, query, where, getDocs, addDoc } from "firebase/firestore"; 
+import { db, isFirebaseConfigured } from '../firebase';
 
 interface AuthProps {
   view: AppView; // LOGIN or REGISTER
   onNavigate: (view: AppView) => void;
-  onLoginSuccess: () => void;
+  onLoginSuccess: (user: UserProfile) => void;
   onGuestLogin: () => void;
 }
 
@@ -21,8 +20,8 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
   });
   const [error, setError] = useState('');
   
-  // Check connection state on mount
-  const isDbReady = isFirebaseConfigured() && !!auth;
+  // Check connection state
+  const isDbReady = isFirebaseConfigured() && !!db;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,61 +29,89 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
     setLoading(true);
 
     try {
-      if (!auth) {
-        throw new Error("Firebase Auth not initialized. Using local mode.");
+      if (!db) {
+        throw new Error("Database not connected. Please use Guest Mode.");
       }
 
       if (view === AppView.REGISTER) {
-        // Register Flow
-        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-        const user = userCredential.user;
-
-        // Create User Profile in Firestore
-        // Note: This might fail if Firestore rules block it, but usually Auth succeeds first.
-        try {
-            await setDoc(doc(db, "users", user.uid), {
-                uid: user.uid,
-                username: formData.username,
-                email: formData.email,
-                role: 'user', // Default role
-                createdAt: serverTimestamp()
-            });
-            // Update Display Name
-            await updateProfile(user, { displayName: formData.username });
-        } catch (firestoreErr) {
-            console.error("Firestore Profile Creation Error:", firestoreErr);
-            // We continue even if Firestore writes fail (User is created in Auth)
-        }
+        // DIRECT DATABASE REGISTRATION (No Firebase Auth Provider)
         
+        // 1. Check if user already exists
+        const usersRef = collection(db, "users");
+        const q = query(usersRef, where("email", "==", formData.email));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+            throw new Error("Email already registered. Please login.");
+        }
+
+        // 2. Create new user document
+        // We generate a custom ID or let Firestore generate it. Here we let Firestore generate it for simplicity 
+        // but to keep 'uid' consistent, we'll generate one manually or use the doc ID.
+        // Let's use a timestamp based ID for simplicity in this custom auth.
+        const newUid = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        const newUserProfile: any = {
+            uid: newUid,
+            username: formData.username,
+            email: formData.email,
+            password: formData.password, // Storing password in DB as requested (Note: Not secure for production)
+            role: 'user',
+            createdAt: serverTimestamp()
+        };
+
+        await setDoc(doc(db, "users", newUid), newUserProfile);
+        
+        // 3. Login immediately
+        const safeProfile: UserProfile = {
+            uid: newUid,
+            username: formData.username,
+            email: formData.email,
+            role: 'user',
+            createdAt: new Date().toISOString() // Approximate for local state
+        };
+        onLoginSuccess(safeProfile);
+
       } else {
-        // Login Flow
-        await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        // DIRECT DATABASE LOGIN
+        const usersRef = collection(db, "users");
+        // Query by email
+        const q = query(usersRef, where("email", "==", formData.email));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+            throw new Error("User not found.");
+        }
+
+        // Check password (client-side check of retrieved doc - insecure but requested 'direct database' method)
+        let foundUser: any = null;
+        querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            if (data.password === formData.password) {
+                foundUser = data;
+            }
+        });
+
+        if (!foundUser) {
+            throw new Error("Invalid password.");
+        }
+
+        const safeProfile: UserProfile = {
+            uid: foundUser.uid,
+            username: foundUser.username,
+            email: foundUser.email,
+            role: foundUser.role || 'user',
+            createdAt: foundUser.createdAt
+        };
+        onLoginSuccess(safeProfile);
       }
       
-      onLoginSuccess();
     } catch (err: any) {
       console.error("Auth Error:", err);
-      let msg = "Authentication failed.";
-      
-      const errString = JSON.stringify(err);
-      const errMsg = err.message || '';
-
-      if (errMsg.includes("not initialized")) {
-         msg = "Database not connected. Please use Guest Mode.";
-      } else if (errMsg.includes("CONFIGURATION_NOT_FOUND") || errString.includes("CONFIGURATION_NOT_FOUND")) {
-         msg = "Firebase Email/Password Auth is not enabled in the Console.";
-      } else if (err.code === 'auth/operation-not-allowed') {
-         msg = "Email/Password provider is disabled in Firebase.";
-      } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-         msg = "Invalid email or password.";
-      } else if (err.code === 'auth/email-already-in-use') {
-         msg = "Email is already registered.";
-      } else if (err.code === 'auth/weak-password') {
-         msg = "Password should be at least 6 characters.";
-      } else if (err.code === 'auth/network-request-failed') {
-         msg = "Network error. Check your connection.";
+      let msg = err.message || "Authentication failed.";
+      if (msg.includes("Missing or insufficient permissions")) {
+         msg = "Database permission error. Ensure Firestore rules are open (test mode).";
       }
-      
       setError(msg);
     } finally {
       setLoading(false);
@@ -215,7 +242,7 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
                 Continue as Guest (Local Mode)
              </button>
              <p className="text-[10px] text-zinc-600 text-center mt-2">
-                *Guest data is stored locally and will be lost if cache is cleared.
+                *Guest data is stored locally. Use this if DB is having issues.
              </p>
           </div>
 

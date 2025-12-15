@@ -14,7 +14,7 @@ import {
   where,
   getDoc
 } from "firebase/firestore";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+// Removed firebase/auth imports as we are moving to custom DB auth
 import { AppView, MessageTemplate, LogEntry, ApiNode, UserProfile } from './types';
 import { INITIAL_API_NODES } from './apiNodes';
 import Sender from './components/Sender';
@@ -26,7 +26,7 @@ import Admin from './components/Admin';
 import Disclaimer from './components/Disclaimer';
 import Landing from './components/Landing';
 import Auth from './components/Auth';
-import { db, auth, isFirebaseConfigured, collections } from './firebase';
+import { db, isFirebaseConfigured, collections } from './firebase';
 
 // Mock Data
 const INITIAL_TEMPLATES: MessageTemplate[] = [
@@ -48,9 +48,9 @@ export default function App() {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
   const [showDisclaimer, setShowDisclaimer] = useState(true);
   
-  // Auth State
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  // Auth State - Initialize from localStorage
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => loadFromStorage('netstrike_active_user', null));
+  const [authLoading, setAuthLoading] = useState(false); // No longer waiting for Firebase Auth
 
   // App State
   const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
@@ -60,53 +60,22 @@ export default function App() {
   
   const isDbConnected = isFirebaseConfigured() && !!db;
 
-  // AUTH LISTENER
+  // Persist User Session
   useEffect(() => {
-    if (auth && db) {
-      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-        if (firebaseUser) {
-          // Fetch user profile from Firestore to get Role
-          const userDocRef = doc(db, "users", firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          
-          if (userDoc.exists()) {
-             setCurrentUser(userDoc.data() as UserProfile);
-          } else {
-             // Fallback if doc missing (should not happen with register flow)
-             const newProfile: UserProfile = {
-                uid: firebaseUser.uid,
-                email: firebaseUser.email,
-                username: firebaseUser.displayName || 'User',
-                role: 'user',
-                createdAt: new Date()
-             };
-             setCurrentUser(newProfile);
-          }
-          
-          // Redirect to Home if on Landing/Login/Register
-          if ([AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
-              setCurrentView(AppView.HOME);
-          }
-        } else {
-          // Do not clear currentUser if it's a guest session (uid starts with guest_)
-          // But here onAuthStateChanged only fires for firebase auth. 
-          // If we manually set guest, this listener might not fire or fire with null.
-          // We handle guest persistence simply by state, but reload will lose it (acceptable for guest).
-          if (currentUser && currentUser.uid.startsWith('guest_')) return;
-
-          setCurrentUser(null);
-          // If not logged in, force Landing or Auth pages
-          if (![AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
-              setCurrentView(AppView.LANDING);
-          }
-        }
-        setAuthLoading(false);
-      });
-      return () => unsubscribe();
+    if (currentUser) {
+      localStorage.setItem('netstrike_active_user', JSON.stringify(currentUser));
+      // Redirect to Home if on Landing/Login/Register
+      if ([AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
+        setCurrentView(AppView.HOME);
+      }
     } else {
-      setAuthLoading(false);
+      localStorage.removeItem('netstrike_active_user');
+      // If not logged in, force Landing or Auth pages
+      if (![AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
+        setCurrentView(AppView.LANDING);
+      }
     }
-  }, [currentView]); // Check view on auth change
+  }, [currentUser]); // Trigger only when user changes
 
   useEffect(() => {
     const accepted = localStorage.getItem('disclaimer_accepted');
@@ -267,8 +236,9 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-     if (auth) await signOut(auth);
+     // No firebase signOut needed
      setCurrentUser(null);
+     localStorage.removeItem('netstrike_active_user');
      setCurrentView(AppView.LANDING);
   };
 
@@ -282,6 +252,12 @@ export default function App() {
     };
     setCurrentUser(guestUser);
     setCurrentView(AppView.HOME);
+  };
+
+  // Handler for custom database auth success
+  const handleAuthSuccess = (user: UserProfile) => {
+    setCurrentUser(user);
+    // View change handled by useEffect
   };
 
   const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
@@ -301,7 +277,7 @@ export default function App() {
             <Auth 
                 view={currentView} 
                 onNavigate={setCurrentView} 
-                onLoginSuccess={() => { /* Handled by auth listener */ }} 
+                onLoginSuccess={handleAuthSuccess} 
                 onGuestLogin={handleGuestLogin}
             />
           );
