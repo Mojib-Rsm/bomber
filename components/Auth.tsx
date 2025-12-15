@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { AppView } from '../types';
-import { Lock, User, Mail, ArrowRight, Loader2, Key, AlertCircle, HardDrive } from 'lucide-react';
+import { Lock, User, Mail, ArrowRight, Loader2, Key, AlertCircle, HardDrive, ShieldAlert } from 'lucide-react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore"; 
+import { doc, setDoc, serverTimestamp } from "firebase/firestore"; 
 import { auth, db, isFirebaseConfigured } from '../firebase';
 
 interface AuthProps {
@@ -40,16 +40,21 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
         const user = userCredential.user;
 
         // Create User Profile in Firestore
-        await setDoc(doc(db, "users", user.uid), {
-          uid: user.uid,
-          username: formData.username,
-          email: formData.email,
-          role: 'user', // Default role
-          createdAt: serverTimestamp()
-        });
-
-        // Update Display Name
-        await updateProfile(user, { displayName: formData.username });
+        // Note: This might fail if Firestore rules block it, but usually Auth succeeds first.
+        try {
+            await setDoc(doc(db, "users", user.uid), {
+                uid: user.uid,
+                username: formData.username,
+                email: formData.email,
+                role: 'user', // Default role
+                createdAt: serverTimestamp()
+            });
+            // Update Display Name
+            await updateProfile(user, { displayName: formData.username });
+        } catch (firestoreErr) {
+            console.error("Firestore Profile Creation Error:", firestoreErr);
+            // We continue even if Firestore writes fail (User is created in Auth)
+        }
         
       } else {
         // Login Flow
@@ -60,14 +65,26 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
     } catch (err: any) {
       console.error("Auth Error:", err);
       let msg = "Authentication failed.";
-      if (err.message.includes("not initialized")) {
-         // Auto-fallback handled by UI below, but if user forces submit:
+      
+      const errString = JSON.stringify(err);
+      const errMsg = err.message || '';
+
+      if (errMsg.includes("not initialized")) {
          msg = "Database not connected. Please use Guest Mode.";
-      } else {
-        if (err.code === 'auth/invalid-credential') msg = "Invalid email or password.";
-        if (err.code === 'auth/email-already-in-use') msg = "Email already in use.";
-        if (err.code === 'auth/weak-password') msg = "Password should be at least 6 characters.";
+      } else if (errMsg.includes("CONFIGURATION_NOT_FOUND") || errString.includes("CONFIGURATION_NOT_FOUND")) {
+         msg = "Firebase Email/Password Auth is not enabled in the Console.";
+      } else if (err.code === 'auth/operation-not-allowed') {
+         msg = "Email/Password provider is disabled in Firebase.";
+      } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+         msg = "Invalid email or password.";
+      } else if (err.code === 'auth/email-already-in-use') {
+         msg = "Email is already registered.";
+      } else if (err.code === 'auth/weak-password') {
+         msg = "Password should be at least 6 characters.";
+      } else if (err.code === 'auth/network-request-failed') {
+         msg = "Network error. Check your connection.";
       }
+      
       setError(msg);
     } finally {
       setLoading(false);
@@ -158,9 +175,20 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
              )}
 
              {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center animate-pulse flex items-center justify-center gap-2">
-                   <AlertCircle className="w-3 h-3" />
-                   {error}
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center animate-pulse flex flex-col items-center justify-center gap-1">
+                   <div className="flex items-center gap-2">
+                       <ShieldAlert className="w-3 h-3" />
+                       <span>{error}</span>
+                   </div>
+                   {(error.includes("Console") || error.includes("connected")) && (
+                       <button 
+                           type="button" 
+                           onClick={onGuestLogin}
+                           className="mt-1 text-xs underline hover:text-white"
+                       >
+                           Switch to Guest Mode?
+                       </button>
+                   )}
                 </div>
              )}
 
@@ -186,6 +214,9 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
              >
                 Continue as Guest (Local Mode)
              </button>
+             <p className="text-[10px] text-zinc-600 text-center mt-2">
+                *Guest data is stored locally and will be lost if cache is cleared.
+             </p>
           </div>
 
           <div className="mt-6 text-center">
