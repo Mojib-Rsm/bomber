@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import { AppView } from '../types';
-import { Lock, User, Mail, ArrowRight, Loader2, Key, AlertCircle } from 'lucide-react';
+import { Lock, User, Mail, ArrowRight, Loader2, Key, AlertCircle, HardDrive } from 'lucide-react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore"; 
-import { auth, db } from '../firebase';
+import { auth, db, isFirebaseConfigured } from '../firebase';
 
 interface AuthProps {
   view: AppView; // LOGIN or REGISTER
   onNavigate: (view: AppView) => void;
   onLoginSuccess: () => void;
+  onGuestLogin: () => void;
 }
 
-const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
+const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLogin }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
@@ -19,6 +20,9 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
     password: ''
   });
   const [error, setError] = useState('');
+  
+  // Check connection state on mount
+  const isDbReady = isFirebaseConfigured() && !!auth;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +30,9 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
     setLoading(true);
 
     try {
-      if (!auth) throw new Error("Firebase Auth not initialized. Check configuration.");
+      if (!auth) {
+        throw new Error("Firebase Auth not initialized. Using local mode.");
+      }
 
       if (view === AppView.REGISTER) {
         // Register Flow
@@ -54,9 +60,14 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
     } catch (err: any) {
       console.error("Auth Error:", err);
       let msg = "Authentication failed.";
-      if (err.code === 'auth/invalid-credential') msg = "Invalid email or password.";
-      if (err.code === 'auth/email-already-in-use') msg = "Email already in use.";
-      if (err.code === 'auth/weak-password') msg = "Password should be at least 6 characters.";
+      if (err.message.includes("not initialized")) {
+         // Auto-fallback handled by UI below, but if user forces submit:
+         msg = "Database not connected. Please use Guest Mode.";
+      } else {
+        if (err.code === 'auth/invalid-credential') msg = "Invalid email or password.";
+        if (err.code === 'auth/email-already-in-use') msg = "Email already in use.";
+        if (err.code === 'auth/weak-password') msg = "Password should be at least 6 characters.";
+      }
       setError(msg);
     } finally {
       setLoading(false);
@@ -135,6 +146,17 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
                 </div>
              </div>
 
+             {/* Connection Error / Auth Error Alert */}
+             {!isDbReady && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-500 font-medium text-center flex flex-col items-center justify-center gap-1">
+                   <div className="flex items-center gap-2">
+                     <HardDrive className="w-3 h-3" />
+                     <span>Database Not Configured</span>
+                   </div>
+                   <span className="text-[10px] opacity-70">Running in local environment mode.</span>
+                </div>
+             )}
+
              {error && (
                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center animate-pulse flex items-center justify-center gap-2">
                    <AlertCircle className="w-3 h-3" />
@@ -144,8 +166,8 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
 
              <button 
                type="submit"
-               disabled={loading}
-               className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] mt-2 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+               disabled={loading || !isDbReady}
+               className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] mt-2 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale"
              >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
                     <>
@@ -155,6 +177,16 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
                 )}
              </button>
           </form>
+
+          {/* Guest Mode Fallback */}
+          <div className="mt-4 pt-4 border-t border-zinc-800/50">
+             <button 
+               onClick={onGuestLogin}
+               className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all text-xs flex items-center justify-center gap-2 border border-zinc-700 hover:border-zinc-600"
+             >
+                Continue as Guest (Local Mode)
+             </button>
+          </div>
 
           <div className="mt-6 text-center">
              <p className="text-xs text-zinc-500">

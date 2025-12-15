@@ -58,7 +58,7 @@ export default function App() {
   const [apiNodes, setApiNodes] = useState<ApiNode[]>(() => loadFromStorage('netstrike_nodes_v5', INITIAL_API_NODES));
   const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
   
-  const isDbConnected = isFirebaseConfigured();
+  const isDbConnected = isFirebaseConfigured() && !!db;
 
   // AUTH LISTENER
   useEffect(() => {
@@ -88,6 +88,12 @@ export default function App() {
               setCurrentView(AppView.HOME);
           }
         } else {
+          // Do not clear currentUser if it's a guest session (uid starts with guest_)
+          // But here onAuthStateChanged only fires for firebase auth. 
+          // If we manually set guest, this listener might not fire or fire with null.
+          // We handle guest persistence simply by state, but reload will lose it (acceptable for guest).
+          if (currentUser && currentUser.uid.startsWith('guest_')) return;
+
           setCurrentUser(null);
           // If not logged in, force Landing or Auth pages
           if (![AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
@@ -109,7 +115,7 @@ export default function App() {
 
   // FIRESTORE SYNC (LOGS & PROTECTED)
   useEffect(() => {
-    if (isDbConnected && db && currentUser) {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
       console.log("Subscribing to Firestore Data...");
 
       // 1. Logs Sync (Role Based)
@@ -154,6 +160,7 @@ export default function App() {
     } else if (!currentUser) {
        setLogs([]); // Clear logs on logout
     }
+    // Guest mode uses local state (logs var), so no sync needed
   }, [isDbConnected, currentUser]);
 
   // Sync Local Settings (Backup)
@@ -173,7 +180,7 @@ export default function App() {
         username: currentUser?.username || 'Unknown'
     };
 
-    if (isDbConnected && db) {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
             await addDoc(collections.logs(db), {
                 ...logWithUser,
@@ -189,7 +196,7 @@ export default function App() {
   };
 
   const handleClearLogs = async () => {
-    if (isDbConnected && db && currentUser) {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
             // Delete only own logs if not admin, or all if admin (logic simplified to own/viewed)
             // Ideally batch delete by query
@@ -234,7 +241,7 @@ export default function App() {
   };
 
   const handleAddProtectedNumber = async (phone: string) => {
-    if (isDbConnected && db) {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
             await setDoc(doc(db, "protected_numbers", phone), { 
                 phone, 
@@ -250,7 +257,7 @@ export default function App() {
   };
 
   const handleRemoveProtectedNumber = async (phone: string) => {
-    if (isDbConnected && db) {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
             await deleteDoc(doc(db, "protected_numbers", phone));
         } catch (e) { console.error("Error removing protected number:", e); }
@@ -263,6 +270,18 @@ export default function App() {
      if (auth) await signOut(auth);
      setCurrentUser(null);
      setCurrentView(AppView.LANDING);
+  };
+
+  const handleGuestLogin = () => {
+    const guestUser: UserProfile = {
+      uid: 'guest_' + Date.now(),
+      email: 'guest@netstrike.local',
+      username: 'Guest_Operative',
+      role: 'user',
+      createdAt: new Date()
+    };
+    setCurrentUser(guestUser);
+    setCurrentView(AppView.HOME);
   };
 
   const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
@@ -278,7 +297,14 @@ export default function App() {
   // Unauthenticated Views
   if (!currentUser) {
       if (currentView === AppView.LOGIN || currentView === AppView.REGISTER) {
-          return <Auth view={currentView} onNavigate={setCurrentView} onLoginSuccess={() => { /* Handled by auth listener */ }} />;
+          return (
+            <Auth 
+                view={currentView} 
+                onNavigate={setCurrentView} 
+                onLoginSuccess={() => { /* Handled by auth listener */ }} 
+                onGuestLogin={handleGuestLogin}
+            />
+          );
       }
       return <Landing onNavigate={setCurrentView} />;
   }
