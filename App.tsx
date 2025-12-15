@@ -236,10 +236,23 @@ function AppContent() {
         username: currentUser?.username || 'Unknown'
     };
     if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try { await addDoc(collections.logs(db), { ...logWithUser, timestamp: new Date() }); } 
-        catch (error) { setLogs(prev => [logWithUser, ...prev]); }
+        try { 
+            await addDoc(collections.logs(db), { ...logWithUser, timestamp: new Date() }); 
+        } catch (error) { 
+            // Fallback to local if DB fails
+            setLogs(prev => {
+                const next = [logWithUser, ...prev];
+                localStorage.setItem('logs', JSON.stringify(next));
+                return next;
+            });
+        }
     } else {
-        setLogs(prev => [logWithUser, ...prev]);
+        // Save to LocalStorage for Guest Mode
+        setLogs(prev => {
+            const next = [logWithUser, ...prev];
+            localStorage.setItem('logs', JSON.stringify(next));
+            return next;
+        });
     }
   };
 

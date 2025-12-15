@@ -17,6 +17,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({ success: 0, fail: 0 });
+  const statsRef = useRef({ success: 0, fail: 0 }); // Ref for accurate final tracking
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -98,7 +99,9 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
           headers: headers,
           body: !isGet ? body : undefined,
           signal,
-          mode: isGet ? 'no-cors' : 'cors'
+          mode: isGet ? 'no-cors' : 'cors',
+          cache: 'no-store', // Attempt to reduce caching
+          referrerPolicy: 'no-referrer' // Hide referrer
       });
       return response;
   };
@@ -108,8 +111,8 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    setIsRunning(false);
-    addLog(">> PROCESS ABORTED");
+    // Note: State update happens in the loop exit logic
+    addLog(">> STOP REQUESTED...");
   };
 
   const handleStart = async () => {
@@ -134,6 +137,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     setProgress(0);
     setConsoleLogs([]);
     setStats({ success: 0, fail: 0 });
+    statsRef.current = { success: 0, fail: 0 };
     
     addLog(`>> INITIALIZING... TARGET: ${phoneNumber}`);
     addLog(`>> GATEWAYS: ${activeNodes.length} ACTIVE`);
@@ -147,14 +151,20 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
       const promises = activeNodes.map(async (api) => {
         try {
           const res = await executeNode(api, phoneNumber, signal);
-          
           const ok = (res.status >= 200 && res.status < 300) || res.status === 0;
           
-          setStats(p => ({ success: p.success + (ok ? 1 : 0), fail: p.fail + (ok ? 0 : 1) }));
-          addLog(`> [${api.name}] ${res.status === 0 ? 'SENT' : res.status} ${ok ? 'OK' : 'ERR'}`);
+          if (!signal.aborted) {
+              statsRef.current = {
+                  success: statsRef.current.success + (ok ? 1 : 0),
+                  fail: statsRef.current.fail + (ok ? 0 : 1)
+              };
+              setStats({...statsRef.current});
+              addLog(`> [${api.name}] ${res.status === 0 ? 'SENT' : res.status} ${ok ? 'OK' : 'ERR'}`);
+          }
         } catch (e: any) {
           if (e.name !== 'AbortError') {
-             setStats(p => ({ ...p, fail: p.fail + 1 }));
+             statsRef.current.fail += 1;
+             setStats({...statsRef.current});
              const errorMsg = e.message === 'Failed to fetch' ? 'Net Error/CORS' : e.message;
              addLog(`> [${api.name}] FAILED: ${errorMsg}`);
           }
@@ -167,17 +177,22 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
       if (i < count - 1) await new Promise(r => setTimeout(r, getDelay()));
     }
 
-    if (!signal.aborted) {
-      addLog(">> COMPLETE");
-      onSend({
-        id: Date.now().toString(),
-        contactName: 'Target',
-        contactPhone: phoneNumber,
-        message: `${count} rounds sent`, 
-        status: 'sent',
-        timestamp: new Date(),
-      });
-    }
+    // Finished or Stopped - Save Log
+    const totalSent = statsRef.current.success;
+    const totalFailed = statsRef.current.fail;
+    const isStopped = signal.aborted;
+
+    addLog(isStopped ? ">> PROCESS ABORTED" : ">> COMPLETE");
+    
+    onSend({
+      id: Date.now().toString(),
+      contactName: 'Target',
+      contactPhone: phoneNumber,
+      message: `Limit: ${count} | OK: ${totalSent} | ERR: ${totalFailed}`, 
+      status: isStopped ? 'queued' : 'sent',
+      timestamp: new Date(),
+    });
+
     setIsRunning(false);
     abortControllerRef.current = null;
   };
@@ -286,7 +301,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
                </div>
             ) : (
                consoleLogs.map((l, i) => (
-                 <div key={i} className={`border-l-2 pl-2 py-0.5 ${l.includes('FAILED') || l.includes('ERR') ? 'border-red-500 text-red-400' : 'border-zinc-800'}`}>
+                 <div key={i} className={`border-l-2 pl-2 py-0.5 ${l.includes('FAILED') || l.includes('ERR') || l.includes('STOPPED') ? 'border-red-500 text-red-400' : 'border-zinc-800'}`}>
                    {l}
                  </div>
                ))
