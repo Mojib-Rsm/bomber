@@ -9,6 +9,7 @@ import Home from './components/Home';
 import Profile from './components/Profile';
 import Admin from './components/Admin';
 import Disclaimer from './components/Disclaimer';
+import { isFirebaseConfigured } from './firebase';
 
 // Mock Data
 const INITIAL_TEMPLATES: MessageTemplate[] = [
@@ -39,7 +40,8 @@ export default function App() {
   const [apiNodes, setApiNodes] = useState<ApiNode[]>(() => loadFromStorage('netstrike_nodes_v5', INITIAL_API_NODES));
   const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
   
-  const isDbConnected = true; 
+  // Check connection status based on Firebase config presence
+  const isDbConnected = isFirebaseConfigured();
 
   useEffect(() => {
     const accepted = localStorage.getItem('disclaimer_accepted');
