@@ -1,8 +1,13 @@
 
-const SMS_API_KEY = "anbu_sms_mgq589nm_9mgblyt069h";
-const SMS_API_URL = "https://sms.anbuinfosec.dev/api/v1/sms/send";
+const SMS_API_KEY = process.env.SMS_API_KEY || "";
+const SMS_API_URL = process.env.SMS_API_URL || "";
 
 export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<boolean> => {
+  if (!SMS_API_KEY || !SMS_API_URL) {
+      console.error("SMS Configuration missing in environment variables.");
+      return false;
+  }
+
   try {
     const payload = {
       apiKey: SMS_API_KEY,
