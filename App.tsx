@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { Home as HomeIcon, Zap, User, LayoutList, ShieldCheck, Settings, LogOut, Loader2 } from 'lucide-react';
 import { 
   collection, 
@@ -11,8 +12,7 @@ import {
   writeBatch, 
   getDocs, 
   setDoc,
-  where,
-  getDoc
+  where
 } from "firebase/firestore";
 import { AppView, MessageTemplate, LogEntry, ApiNode, UserProfile } from './types';
 import { INITIAL_API_NODES } from './apiNodes';
@@ -24,8 +24,8 @@ import Profile from './components/Profile';
 import Admin from './components/Admin';
 import Disclaimer from './components/Disclaimer';
 import Landing from './components/Landing';
-import Login from './components/Login';       // New Import
-import Register from './components/Register'; // New Import
+import Login from './components/Login';
+import Register from './components/Register';
 import { db, isFirebaseConfigured, collections } from './firebase';
 
 // Mock Data
@@ -44,345 +44,47 @@ const loadFromStorage = <T,>(key: string, defaultVal: T): T => {
   return defaultVal;
 };
 
-export default function App() {
-  const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
-  const [showDisclaimer, setShowDisclaimer] = useState(true);
-  
-  // Auth State - Initialize from localStorage for "Remember Me"
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => loadFromStorage('netstrike_active_user', null));
-  const [rememberSession, setRememberSession] = useState(true); // Default to true
+// --- Layout Components ---
 
-  // App State
-  const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
-  const [disabledNodes, setDisabledNodes] = useState<string[]>(() => loadFromStorage('disabled_nodes', []));
-  const [apiNodes, setApiNodes] = useState<ApiNode[]>([]);
-  const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
-  
+const AuthLayout = () => {
+  return <Outlet />;
+};
+
+const MainLayout = ({ 
+  currentUser, 
+  handleLogout 
+}: { 
+  currentUser: UserProfile; 
+  handleLogout: () => void;
+}) => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const isDbConnected = isFirebaseConfigured() && !!db;
 
-  // Persist User Session (Remember Me Logic)
-  useEffect(() => {
-    if (currentUser && rememberSession) {
-      localStorage.setItem('netstrike_active_user', JSON.stringify(currentUser));
-      // Redirect to HOME if on Auth pages
-      if ([AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
-        setCurrentView(AppView.HOME);
-      }
-    } else if (!currentUser) {
-      localStorage.removeItem('netstrike_active_user');
-      // Force Auth views if logged out
-      if (![AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
-        setCurrentView(AppView.LANDING);
-      }
-    }
-  }, [currentUser, rememberSession]); // Trigger only when user or preference changes
-
-  useEffect(() => {
-    const accepted = localStorage.getItem('disclaimer_accepted');
-    if (accepted === 'true') setShowDisclaimer(false);
-  }, []);
-
-  // FIRESTORE SYNC (LOGS, PROTECTED, API NODES)
-  useEffect(() => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-      console.log("Subscribing to Firestore Data...");
-
-      // 1. Logs Sync
-      let qLogs;
-      if (currentUser.role === 'admin') {
-         qLogs = query(collections.logs(db), orderBy("timestamp", "desc"));
-      } else {
-         qLogs = query(collections.logs(db), where("userId", "==", currentUser.uid), orderBy("timestamp", "desc"));
-      }
-
-      const unsubLogs = onSnapshot(qLogs, (snapshot) => {
-        const firebaseLogs = snapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            ...data,
-            id: doc.id,
-            timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp)
-          } as LogEntry;
-        });
-        setLogs(firebaseLogs);
-      }, (err) => {
-          console.error("Logs sync error:", err);
-      });
-
-      // 2. Sync Protected Numbers
-      const qProt = collection(db, "protected_numbers");
-      const unsubProt = onSnapshot(qProt, (snapshot) => {
-         const nums = snapshot.docs.map(doc => doc.data().phone as string);
-         setProtectedNumbers(nums);
-      }, (err) => console.error("Protector sync error:", err));
-
-      // 3. Sync API Nodes (DB Source of Truth)
-      const qNodes = collection(db, "api_nodes");
-      const unsubNodes = onSnapshot(qNodes, (snapshot) => {
-          const loadedNodes = snapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-          } as ApiNode));
-          
-          loadedNodes.sort((a, b) => a.name.localeCompare(b.name));
-          setApiNodes(loadedNodes);
-      }, (err) => console.error("API Nodes sync error:", err));
-
-      return () => {
-        unsubLogs();
-        unsubProt();
-        unsubNodes();
-      };
-    } else {
-       if (!currentUser) {
-           setLogs([]);
-           setApiNodes([]); 
-       } else {
-           const storedNodes = localStorage.getItem('netstrike_nodes_v5');
-           if (storedNodes) {
-               setApiNodes(JSON.parse(storedNodes));
-           } else {
-               setApiNodes(INITIAL_API_NODES);
-           }
-       }
-    }
-  }, [isDbConnected, currentUser]);
-
-  // Sync Local Settings (Backup)
-  useEffect(() => { localStorage.setItem('disabled_nodes', JSON.stringify(disabledNodes)); }, [disabledNodes]);
-  useEffect(() => { 
-      if (!isDbConnected || (currentUser && currentUser.uid.startsWith('guest_'))) {
-        localStorage.setItem('netstrike_nodes_v5', JSON.stringify(apiNodes)); 
-      }
-  }, [apiNodes, isDbConnected, currentUser]);
-  
-  const handleAcceptDisclaimer = () => {
-    localStorage.setItem('disclaimer_accepted', 'true');
-    setShowDisclaimer(false);
-  };
-  
-  const handleSendLog = async (log: LogEntry) => {
-    const logWithUser: LogEntry = {
-        ...log,
-        userId: currentUser?.uid,
-        username: currentUser?.username || 'Unknown'
-    };
-
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try {
-            await addDoc(collections.logs(db), {
-                ...logWithUser,
-                timestamp: new Date()
-            });
-        } catch (error) {
-            console.error("Error saving log to DB:", error);
-            setLogs(prev => [logWithUser, ...prev]);
-        }
-    } else {
-        setLogs(prev => [logWithUser, ...prev]);
-    }
-  };
-
-  const handleClearLogs = async () => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try {
-            const q = currentUser.role === 'admin' 
-                ? query(collections.logs(db)) 
-                : query(collections.logs(db), where("userId", "==", currentUser.uid));
-            
-            const snapshot = await getDocs(q);
-            const batch = writeBatch(db);
-            snapshot.docs.forEach(doc => {
-                batch.delete(doc.ref);
-            });
-            await batch.commit();
-        } catch (error) {
-            console.error("Error clearing logs DB:", error);
-        }
-    } else {
-        setLogs([]);
-        localStorage.removeItem('logs');
-    }
-  };
-
-  const handleClearContacts = () => { localStorage.removeItem('contacts'); };
-  
-  const handleToggleNode = (name: string) => {
-    setDisabledNodes(prev => 
-      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+  const NavItem = ({ path, icon: Icon, label }: { path: string, icon: any, label: string }) => {
+    const isActive = location.pathname === path;
+    return (
+      <button 
+        onClick={() => navigate(path)}
+        className={`flex flex-col items-center justify-center gap-1 w-full h-full transition-all duration-200 ${
+          isActive 
+            ? 'text-emerald-500' 
+            : 'text-zinc-500 hover:text-zinc-300'
+        }`}
+      >
+        <Icon className={`w-5 h-5 ${isActive ? 'fill-emerald-500/20' : ''}`} />
+        <span className="text-[10px] font-medium tracking-wide">{label}</span>
+      </button>
     );
   };
-
-  const handleUpdateNode = async (updatedNode: ApiNode) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try {
-             await setDoc(doc(db, "api_nodes", updatedNode.id), updatedNode);
-        } catch(e) { console.error("DB Update Failed", e); }
-    } else {
-        setApiNodes(prev => prev.map(node => node.id === updatedNode.id ? updatedNode : node));
-    }
-  };
-
-  const handleAddNode = async (newNode: ApiNode) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try {
-             await setDoc(doc(db, "api_nodes", newNode.id), newNode);
-        } catch(e) { console.error("DB Add Failed", e); }
-    } else {
-        setApiNodes(prev => [...prev, newNode]);
-    }
-  };
-
-  const handleDeleteNode = async (id: string) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try {
-             await deleteDoc(doc(db, "api_nodes", id));
-        } catch(e) { console.error("DB Delete Failed", e); }
-    } else {
-        setApiNodes(prev => prev.filter(node => node.id !== id));
-    }
-  };
-
-  const handleAddProtectedNumber = async (phone: string) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try {
-            await setDoc(doc(db, "protected_numbers", phone), { 
-                phone, 
-                addedAt: new Date(),
-                addedBy: currentUser?.username || 'System'
-            });
-        } catch (e) { console.error("Error protecting number:", e); }
-    } else {
-        if (!protectedNumbers.includes(phone)) {
-            setProtectedNumbers(prev => [...prev, phone]);
-        }
-    }
-  };
-
-  const handleRemoveProtectedNumber = async (phone: string) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
-        try {
-            await deleteDoc(doc(db, "protected_numbers", phone));
-        } catch (e) { console.error("Error removing protected number:", e); }
-    } else {
-        setProtectedNumbers(prev => prev.filter(num => num !== phone));
-    }
-  };
-
-  const handleLogout = async () => {
-     setCurrentUser(null);
-     localStorage.removeItem('netstrike_active_user');
-     setCurrentView(AppView.LANDING);
-  };
-
-  const handleGuestLogin = () => {
-    const guestUser: UserProfile = {
-      uid: 'guest_' + Date.now(),
-      email: 'guest@netstrike.local',
-      username: 'Guest_Operative',
-      role: 'user',
-      createdAt: new Date()
-    };
-    setRememberSession(false); // Guest is typically temporary
-    setCurrentUser(guestUser);
-    setCurrentView(AppView.HOME);
-  };
-
-  const handleAuthSuccess = (user: UserProfile, remember: boolean) => {
-    setRememberSession(remember);
-    setCurrentUser(user);
-    // View change is handled by useEffect when currentUser updates
-  };
-
-  const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
-
-  // Unauthenticated Views
-  if (!currentUser) {
-      if (currentView === AppView.LOGIN) {
-          return <Login onNavigate={setCurrentView} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />;
-      }
-      if (currentView === AppView.REGISTER) {
-          return <Register onNavigate={setCurrentView} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />;
-      }
-      return <Landing onNavigate={setCurrentView} />;
-  }
-
-  // Authenticated Views
-  const renderContent = () => {
-    switch (currentView) {
-      case AppView.HOME: 
-        return <Home onNavigate={setCurrentView} nodeCount={activeNodes.length} />;
-      case AppView.SEND: 
-        return (
-          <Sender 
-            templates={INITIAL_TEMPLATES} 
-            onSend={handleSendLog} 
-            protectedNumbers={protectedNumbers} 
-            activeNodes={activeNodes}
-          />
-        );
-      case AppView.TEMPLATES: return <HistoryLog logs={logs} />;
-      case AppView.PROTECTOR: 
-        return (
-           <Protector 
-              protectedNumbers={protectedNumbers} 
-              onAdd={handleAddProtectedNumber}
-              onRemove={handleRemoveProtectedNumber}
-           />
-        );
-      case AppView.PROFILE: 
-        return (
-          <Profile 
-            logs={logs} 
-            contacts={[]} 
-            currentUser={currentUser}
-            onClearLogs={handleClearLogs} 
-            onClearContacts={handleClearContacts}
-            onNavigate={setCurrentView}
-          />
-        );
-      case AppView.ADMIN: 
-        return (
-          <Admin 
-            apiNodes={apiNodes} 
-            disabledNodes={disabledNodes} 
-            currentUser={currentUser}
-            logs={logs}
-            toggleNode={handleToggleNode} 
-            onUpdateNode={handleUpdateNode}
-            onAddNode={handleAddNode}
-            onDeleteNode={handleDeleteNode}
-            onLogout={() => setCurrentView(AppView.PROFILE)} 
-          />
-        );
-      default: 
-        return <Home onNavigate={setCurrentView} nodeCount={activeNodes.length} />;
-    }
-  };
-
-  const NavItem = ({ view, icon: Icon, label }: { view: AppView, icon: any, label: string }) => (
-    <button 
-      onClick={() => setCurrentView(view)}
-      className={`flex flex-col items-center justify-center gap-1 w-full h-full transition-all duration-200 ${
-        currentView === view 
-          ? 'text-emerald-500' 
-          : 'text-zinc-500 hover:text-zinc-300'
-      }`}
-    >
-      <Icon className={`w-5 h-5 ${currentView === view ? 'fill-emerald-500/20' : ''}`} />
-      <span className="text-[10px] font-medium tracking-wide">{label}</span>
-    </button>
-  );
 
   return (
     <div className="flex flex-col h-screen bg-[#09090b] text-zinc-200 overflow-hidden font-sans">
       
-      {showDisclaimer && <Disclaimer onAccept={handleAcceptDisclaimer} />}
-
       {/* Header */}
       <header className="h-14 border-b border-zinc-800 bg-[#09090b]/80 backdrop-blur-md flex items-center justify-between px-5 z-20 shrink-0 sticky top-0">
         <div 
-          onClick={() => setCurrentView(AppView.HOME)} 
+          onClick={() => navigate('/home')} 
           className="flex items-center gap-2 cursor-pointer group"
         >
             <div className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`}></div>
@@ -398,8 +100,8 @@ export default function App() {
            </div>
            
            <button 
-            onClick={() => setCurrentView(AppView.PROFILE)}
-            className={`p-2 rounded-full transition-colors ${currentView === AppView.PROFILE ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white'}`}
+            onClick={() => navigate('/profile')}
+            className={`p-2 rounded-full transition-colors ${location.pathname === '/profile' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white'}`}
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -416,21 +118,258 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto scroll-smooth relative">
         <div className="max-w-2xl mx-auto min-h-full">
-            {renderContent()}
+            <Outlet />
         </div>
       </main>
 
       {/* Bottom Navigation */}
-      {currentView !== AppView.ADMIN && (
+      {location.pathname !== '/admin' && (
         <nav className="h-16 border-t border-zinc-800 bg-[#09090b]/90 backdrop-blur-xl shrink-0 z-20 pb-safe">
           <div className="flex h-full max-w-2xl mx-auto">
-            <NavItem view={AppView.SEND} icon={Zap} label="Bomber" />
-            <NavItem view={AppView.HOME} icon={HomeIcon} label="Status" />
-            <NavItem view={AppView.PROTECTOR} icon={ShieldCheck} label="Protect" />
-            <NavItem view={AppView.TEMPLATES} icon={LayoutList} label="Logs" />
+            <NavItem path="/bomber" icon={Zap} label="Bomber" />
+            <NavItem path="/home" icon={HomeIcon} label="Status" />
+            <NavItem path="/protector" icon={ShieldCheck} label="Protect" />
+            <NavItem path="/logs" icon={LayoutList} label="Logs" />
           </div>
         </nav>
       )}
     </div>
+  );
+};
+
+// --- Main App Logic ---
+
+function AppContent() {
+  const [showDisclaimer, setShowDisclaimer] = useState(true);
+  
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => loadFromStorage('netstrike_active_user', null));
+  const [rememberSession, setRememberSession] = useState(true);
+
+  // App Data
+  const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
+  const [disabledNodes, setDisabledNodes] = useState<string[]>(() => loadFromStorage('disabled_nodes', []));
+  const [apiNodes, setApiNodes] = useState<ApiNode[]>([]);
+  const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
+  
+  const isDbConnected = isFirebaseConfigured() && !!db;
+  const navigate = useNavigate();
+
+  // Navigation Wrapper for legacy components
+  const handleLegacyNavigate = (view: AppView) => {
+    switch(view) {
+      case AppView.HOME: navigate('/home'); break;
+      case AppView.SEND: navigate('/bomber'); break;
+      case AppView.PROTECTOR: navigate('/protector'); break;
+      case AppView.TEMPLATES: navigate('/logs'); break;
+      case AppView.PROFILE: navigate('/profile'); break;
+      case AppView.ADMIN: navigate('/admin'); break;
+      case AppView.LOGIN: navigate('/login'); break;
+      case AppView.REGISTER: navigate('/register'); break;
+      case AppView.LANDING: navigate('/'); break;
+      default: navigate('/home');
+    }
+  };
+
+  // Auth Persistence
+  useEffect(() => {
+    if (currentUser && rememberSession) {
+      localStorage.setItem('netstrike_active_user', JSON.stringify(currentUser));
+    } else if (!currentUser) {
+      localStorage.removeItem('netstrike_active_user');
+    }
+  }, [currentUser, rememberSession]);
+
+  useEffect(() => {
+    const accepted = localStorage.getItem('disclaimer_accepted');
+    if (accepted === 'true') setShowDisclaimer(false);
+  }, []);
+
+  // Sync Logic
+  useEffect(() => {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+      const qLogs = currentUser.role === 'admin' 
+        ? query(collections.logs(db), orderBy("timestamp", "desc"))
+        : query(collections.logs(db), where("userId", "==", currentUser.uid), orderBy("timestamp", "desc"));
+
+      const unsubLogs = onSnapshot(qLogs, (snapshot) => {
+        const firebaseLogs = snapshot.docs.map(doc => ({
+          ...doc.data(),
+          id: doc.id,
+          timestamp: doc.data().timestamp?.toDate ? doc.data().timestamp.toDate() : new Date(doc.data().timestamp)
+        } as LogEntry));
+        setLogs(firebaseLogs);
+      });
+
+      const unsubProt = onSnapshot(collection(db, "protected_numbers"), (snapshot) => {
+         setProtectedNumbers(snapshot.docs.map(doc => doc.data().phone as string));
+      });
+
+      const unsubNodes = onSnapshot(collection(db, "api_nodes"), (snapshot) => {
+          const loadedNodes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ApiNode));
+          loadedNodes.sort((a, b) => a.name.localeCompare(b.name));
+          setApiNodes(loadedNodes);
+      });
+
+      return () => { unsubLogs(); unsubProt(); unsubNodes(); };
+    } else {
+       if (!currentUser) {
+           setLogs([]);
+           setApiNodes([]); 
+       } else {
+           const storedNodes = localStorage.getItem('netstrike_nodes_v5');
+           setApiNodes(storedNodes ? JSON.parse(storedNodes) : INITIAL_API_NODES);
+       }
+    }
+  }, [isDbConnected, currentUser]);
+
+  // Actions
+  const handleAcceptDisclaimer = () => {
+    localStorage.setItem('disclaimer_accepted', 'true');
+    setShowDisclaimer(false);
+  };
+  
+  const handleSendLog = async (log: LogEntry) => {
+    const logWithUser: LogEntry = {
+        ...log,
+        userId: currentUser?.uid,
+        username: currentUser?.username || 'Unknown'
+    };
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        try { await addDoc(collections.logs(db), { ...logWithUser, timestamp: new Date() }); } 
+        catch (error) { setLogs(prev => [logWithUser, ...prev]); }
+    } else {
+        setLogs(prev => [logWithUser, ...prev]);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        const q = currentUser.role === 'admin' ? query(collections.logs(db)) : query(collections.logs(db), where("userId", "==", currentUser.uid));
+        const snapshot = await getDocs(q);
+        const batch = writeBatch(db);
+        snapshot.docs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+    } else {
+        setLogs([]);
+        localStorage.removeItem('logs');
+    }
+  };
+
+  const handleToggleNode = (name: string) => {
+    setDisabledNodes(prev => {
+        const next = prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name];
+        localStorage.setItem('disabled_nodes', JSON.stringify(next));
+        return next;
+    });
+  };
+
+  const handleUpdateNode = async (updatedNode: ApiNode) => {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        await setDoc(doc(db, "api_nodes", updatedNode.id), updatedNode);
+    } else {
+        setApiNodes(prev => prev.map(node => node.id === updatedNode.id ? updatedNode : node));
+    }
+  };
+
+  const handleAddNode = async (newNode: ApiNode) => {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        await setDoc(doc(db, "api_nodes", newNode.id), newNode);
+    } else {
+        setApiNodes(prev => [...prev, newNode]);
+    }
+  };
+
+  const handleDeleteNode = async (id: string) => {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        await deleteDoc(doc(db, "api_nodes", id));
+    } else {
+        setApiNodes(prev => prev.filter(node => node.id !== id));
+    }
+  };
+
+  const handleAddProtectedNumber = async (phone: string) => {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        await setDoc(doc(db, "protected_numbers", phone), { phone, addedAt: new Date(), addedBy: currentUser?.username || 'System' });
+    } else {
+        if (!protectedNumbers.includes(phone)) {
+            const next = [...protectedNumbers, phone];
+            setProtectedNumbers(next);
+            localStorage.setItem('protected_numbers', JSON.stringify(next));
+        }
+    }
+  };
+
+  const handleRemoveProtectedNumber = async (phone: string) => {
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        await deleteDoc(doc(db, "protected_numbers", phone));
+    } else {
+        const next = protectedNumbers.filter(num => num !== phone);
+        setProtectedNumbers(next);
+        localStorage.setItem('protected_numbers', JSON.stringify(next));
+    }
+  };
+
+  const handleLogout = () => {
+     setCurrentUser(null);
+     localStorage.removeItem('netstrike_active_user');
+     navigate('/');
+  };
+
+  const handleGuestLogin = () => {
+    const guestUser: UserProfile = {
+      uid: 'guest_' + Date.now(),
+      email: 'guest@netstrike.local',
+      username: 'Guest_Operative',
+      role: 'user',
+      createdAt: new Date()
+    };
+    setRememberSession(false);
+    setCurrentUser(guestUser);
+    navigate('/home');
+  };
+
+  const handleAuthSuccess = (user: UserProfile, remember: boolean) => {
+    setRememberSession(remember);
+    setCurrentUser(user);
+    navigate('/home');
+  };
+
+  const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
+
+  return (
+    <>
+      {showDisclaimer && <Disclaimer onAccept={handleAcceptDisclaimer} />}
+      
+      <Routes>
+        {/* Public Routes */}
+        <Route element={<AuthLayout />}>
+           <Route path="/" element={currentUser ? <Navigate to="/home" /> : <Landing onNavigate={handleLegacyNavigate} />} />
+           <Route path="/login" element={currentUser ? <Navigate to="/home" /> : <Login onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />} />
+           <Route path="/register" element={currentUser ? <Navigate to="/home" /> : <Register onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />} />
+        </Route>
+
+        {/* Protected Routes */}
+        <Route element={currentUser ? <MainLayout currentUser={currentUser} handleLogout={handleLogout} /> : <Navigate to="/" />}>
+           <Route path="/home" element={<Home onNavigate={handleLegacyNavigate} nodeCount={activeNodes.length} />} />
+           <Route path="/bomber" element={<Sender templates={INITIAL_TEMPLATES} onSend={handleSendLog} protectedNumbers={protectedNumbers} activeNodes={activeNodes} />} />
+           <Route path="/protector" element={<Protector protectedNumbers={protectedNumbers} onAdd={handleAddProtectedNumber} onRemove={handleRemoveProtectedNumber} />} />
+           <Route path="/logs" element={<HistoryLog logs={logs} />} />
+           <Route path="/profile" element={<Profile logs={logs} contacts={[]} currentUser={currentUser} onClearLogs={handleClearLogs} onClearContacts={() => {}} onNavigate={handleLegacyNavigate} />} />
+           <Route path="/admin" element={<Admin apiNodes={apiNodes} disabledNodes={disabledNodes} currentUser={currentUser} logs={logs} toggleNode={handleToggleNode} onUpdateNode={handleUpdateNode} onAddNode={handleAddNode} onDeleteNode={handleDeleteNode} onLogout={() => navigate('/profile')} />} />
+        </Route>
+        
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" />} />
+      </Routes>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   );
 }
