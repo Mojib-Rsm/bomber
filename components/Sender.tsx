@@ -345,8 +345,8 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
            {isCloudMode ? <WifiOff className="w-4 h-4 mt-0.5 shrink-0" /> : <Wifi className="w-4 h-4 mt-0.5 shrink-0" />}
            <p className="leading-relaxed">
              {isCloudMode 
-                ? <strong>Offline Capable:</strong> Request will be sent to the server. You can close this tab or turn off internet after starting.
-                : <strong>Browser Dependent:</strong> Tab must remain open and internet connected to send requests.
+                ? <><strong className="font-bold">Offline Capable:</strong> Request will be sent to the server. You can close this tab or turn off internet after starting.</>
+                : <><strong className="font-bold">Browser Dependent:</strong> Tab must remain open and internet connected to send requests.</>
              }
            </p>
         </div>
