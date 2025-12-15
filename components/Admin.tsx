@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ApiNode, UserProfile, LogEntry, ActiveSession } from '../types';
-import { ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, Database, Users, FileText, CheckCircle2, AlertCircle, PlayCircle, StopCircle, RefreshCw } from 'lucide-react';
+import { ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, Database, Users, FileText, CheckCircle2, AlertCircle, PlayCircle, StopCircle, RefreshCw, Download, Upload, Code } from 'lucide-react';
 import { INITIAL_API_NODES } from '../apiNodes';
 import { collection, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -41,10 +41,14 @@ const Admin: React.FC<AdminProps> = ({
   // API Modal State
   const [editingNode, setEditingNode] = useState<ApiNode | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isJsonModalOpen, setIsJsonModalOpen] = useState(false);
+  const [viewingJsonNode, setViewingJsonNode] = useState<ApiNode | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState<ApiNode>({
     id: '', name: '', url: '', method: 'POST', headers: '{"Content-Type": "application/json"}', body: '{}'
   });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // FETCH USERS EFFECT
   useEffect(() => {
@@ -109,6 +113,11 @@ const Admin: React.FC<AdminProps> = ({
     setIsModalOpen(true);
   };
 
+  const openJsonModal = (node: ApiNode) => {
+    setViewingJsonNode(node);
+    setIsJsonModalOpen(true);
+  };
+
   const handleSaveNode = () => {
     if (!formData.name || !formData.url) return;
     try { JSON.parse(formData.headers); } catch { alert("Invalid JSON in Headers"); return; }
@@ -117,12 +126,56 @@ const Admin: React.FC<AdminProps> = ({
     setIsModalOpen(false);
   };
 
-  const handleSeedDatabase = () => {
-    if (confirm('This will add default API nodes to the database. Continue?')) {
-        INITIAL_API_NODES.forEach(node => {
-            if (!apiNodes.some(n => n.name === node.name)) onAddNode({ ...node });
-        });
+  // EXPORT / IMPORT HANDLERS
+  const handleExport = () => {
+    const dataStr = JSON.stringify(apiNodes, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `netstrike_gateways_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportClick = () => {
+    if (fileInputRef.current) {
+        fileInputRef.current.click();
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const json = JSON.parse(event.target?.result as string);
+            if (Array.isArray(json)) {
+                if (confirm(`Import ${json.length} gateways? This will add them to the database.`)) {
+                    json.forEach((node: any) => {
+                        // Basic validation
+                        if (node.name && node.url) {
+                            onAddNode({
+                                ...node,
+                                id: node.id || Date.now().toString() + Math.random()
+                            });
+                        }
+                    });
+                }
+            } else {
+                alert("Invalid JSON format. Expected an array of nodes.");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Failed to parse JSON file.");
+        }
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
   };
 
   // SESSION HANDLER
@@ -293,8 +346,18 @@ const Admin: React.FC<AdminProps> = ({
                     />
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={handleSeedDatabase} className="p-2 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded hover:text-white" title="Sync Default">
-                        <Database className="w-4 h-4" />
+                    <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleFileChange} 
+                        className="hidden" 
+                        accept=".json"
+                    />
+                    <button onClick={handleImportClick} className="p-2 bg-emerald-600/10 text-emerald-500 border border-emerald-500/20 rounded hover:bg-emerald-600 hover:text-white" title="Import JSON">
+                        <Upload className="w-4 h-4" />
+                    </button>
+                    <button onClick={handleExport} className="p-2 bg-zinc-800 text-zinc-400 border border-zinc-700 rounded hover:text-white" title="Export JSON">
+                        <Download className="w-4 h-4" />
                     </button>
                     <button onClick={openAddModal} className="p-2 bg-blue-600/10 text-blue-500 border border-blue-500/20 rounded hover:bg-blue-600 hover:text-white">
                         <Plus className="w-4 h-4" />
@@ -316,6 +379,7 @@ const Admin: React.FC<AdminProps> = ({
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
+                                <button onClick={() => openJsonModal(node)} className="p-1.5 text-zinc-500 hover:text-white bg-zinc-800 rounded hover:bg-zinc-700" title="View JSON"><Code className="w-3 h-3" /></button>
                                 <button onClick={() => openEditModal(node)} className="p-1.5 text-zinc-500 hover:text-white bg-zinc-800 rounded hover:bg-zinc-700"><Edit2 className="w-3 h-3" /></button>
                                 <button onClick={() => { if(confirm('Delete this API?')) onDeleteNode(node.id) }} className="p-1.5 text-zinc-500 hover:text-red-500 bg-zinc-800 rounded hover:bg-red-900/20"><Trash2 className="w-3 h-3" /></button>
                                 <button onClick={() => toggleNode(node.name)} className={`px-2 py-1 rounded text-[9px] font-bold uppercase w-16 ${isDisabled ? 'bg-zinc-800 text-zinc-500 hover:text-emerald-500' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'}`}>{isDisabled ? 'Enable' : 'Active'}</button>
@@ -324,6 +388,12 @@ const Admin: React.FC<AdminProps> = ({
                     </div>
                     );
                 })}
+                {apiNodes.length === 0 && (
+                     <div className="p-8 text-center text-xs text-zinc-500 flex flex-col items-center gap-2">
+                        <Server className="w-8 h-8 opacity-20" />
+                        <span>No Gateways Found. Import JSON or Add Manually.</span>
+                     </div>
+                )}
             </div>
          </div>
        )}
@@ -466,6 +536,28 @@ const Admin: React.FC<AdminProps> = ({
                </div>
             </div>
          </div>
+       )}
+
+       {/* View JSON Modal */}
+       {isJsonModalOpen && viewingJsonNode && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+             <div className="bg-[#09090b] border border-zinc-700 w-full max-w-lg rounded-xl overflow-hidden shadow-2xl">
+                <div className="bg-zinc-900 p-4 border-b border-zinc-800 flex justify-between items-center">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Raw Configuration</h3>
+                    <button onClick={() => setIsJsonModalOpen(false)}><X className="w-4 h-4 text-zinc-500 hover:text-white" /></button>
+                </div>
+                <div className="p-0">
+                    <textarea 
+                        readOnly
+                        className="w-full h-80 bg-zinc-950 p-4 font-mono-code text-[10px] text-emerald-500 outline-none resize-none border-none"
+                        value={JSON.stringify(viewingJsonNode, null, 2)}
+                    />
+                </div>
+                <div className="p-3 bg-zinc-900 border-t border-zinc-800 flex justify-end">
+                    <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(viewingJsonNode, null, 2)); alert('Copied to clipboard'); }} className="text-xs text-zinc-400 hover:text-white font-bold uppercase">Copy JSON</button>
+                </div>
+             </div>
+          </div>
        )}
     </div>
   );
