@@ -12,9 +12,10 @@ import {
   writeBatch, 
   getDocs, 
   setDoc,
-  where
+  where,
+  updateDoc
 } from "firebase/firestore";
-import { AppView, MessageTemplate, LogEntry, ApiNode, UserProfile } from './types';
+import { AppView, MessageTemplate, LogEntry, ApiNode, UserProfile, ActiveSession } from './types';
 import { INITIAL_API_NODES } from './apiNodes';
 import Sender from './components/Sender';
 import HistoryLog from './components/HistoryLog';
@@ -148,6 +149,7 @@ function AppContent() {
 
   // App Data
   const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
+  const [userSessions, setUserSessions] = useState<ActiveSession[]>([]);
   const [disabledNodes, setDisabledNodes] = useState<string[]>(() => loadFromStorage('disabled_nodes', []));
   const [apiNodes, setApiNodes] = useState<ApiNode[]>([]);
   const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
@@ -201,6 +203,22 @@ function AppContent() {
         setLogs(firebaseLogs);
       });
 
+      // Session/History Sync
+      const qSessions = query(
+          collections.sessions(db), 
+          where("userId", "==", currentUser.uid), 
+          orderBy("lastUpdate", "desc")
+      );
+      const unsubSessions = onSnapshot(qSessions, (snapshot) => {
+          const sessions = snapshot.docs.map(doc => ({
+              ...doc.data(),
+              id: doc.id,
+              startTime: doc.data().startTime?.toDate ? doc.data().startTime.toDate() : new Date(doc.data().startTime || Date.now()),
+              lastUpdate: doc.data().lastUpdate?.toDate ? doc.data().lastUpdate.toDate() : new Date(doc.data().lastUpdate || Date.now()),
+          } as ActiveSession));
+          setUserSessions(sessions);
+      });
+
       const unsubProt = onSnapshot(collection(db, "protected_numbers"), (snapshot) => {
          setProtectedNumbers(snapshot.docs.map(doc => doc.data().phone as string));
       });
@@ -211,11 +229,12 @@ function AppContent() {
           setApiNodes(loadedNodes);
       });
 
-      return () => { unsubLogs(); unsubProt(); unsubNodes(); };
+      return () => { unsubLogs(); unsubProt(); unsubNodes(); unsubSessions(); };
     } else {
        if (!currentUser) {
            setLogs([]);
            setApiNodes([]); 
+           setUserSessions([]);
        } else {
            const storedNodes = localStorage.getItem('netstrike_nodes_v5');
            setApiNodes(storedNodes ? JSON.parse(storedNodes) : INITIAL_API_NODES);
@@ -230,6 +249,7 @@ function AppContent() {
   };
   
   const handleSendLog = async (log: LogEntry) => {
+    // Legacy support for single messages
     const logWithUser: LogEntry = {
         ...log,
         userId: currentUser?.uid,
@@ -238,22 +258,19 @@ function AppContent() {
     if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try { 
             await addDoc(collections.logs(db), { ...logWithUser, timestamp: new Date() }); 
-        } catch (error) { 
-            // Fallback to local if DB fails
-            setLogs(prev => {
-                const next = [logWithUser, ...prev];
-                localStorage.setItem('logs', JSON.stringify(next));
-                return next;
-            });
-        }
-    } else {
-        // Save to LocalStorage for Guest Mode
-        setLogs(prev => {
-            const next = [logWithUser, ...prev];
-            localStorage.setItem('logs', JSON.stringify(next));
-            return next;
-        });
+        } catch (error) { console.error(error); }
     }
+  };
+
+  const handleStopSession = async (sessionId: string) => {
+      if (isDbConnected && db) {
+          try {
+            await updateDoc(doc(db, 'active_sessions', sessionId), {
+                status: 'stopped',
+                lastUpdate: new Date()
+            });
+          } catch(e) { console.error("Error stopping session", e); }
+      }
   };
 
   const handleClearLogs = async () => {
@@ -367,7 +384,7 @@ function AppContent() {
            <Route path="/home" element={<Home onNavigate={handleLegacyNavigate} nodeCount={activeNodes.length} />} />
            <Route path="/bomber" element={<Sender templates={INITIAL_TEMPLATES} onSend={handleSendLog} protectedNumbers={protectedNumbers} activeNodes={activeNodes} currentUser={currentUser} />} />
            <Route path="/protector" element={<Protector protectedNumbers={protectedNumbers} onAdd={handleAddProtectedNumber} onRemove={handleRemoveProtectedNumber} />} />
-           <Route path="/logs" element={<HistoryLog logs={logs} />} />
+           <Route path="/logs" element={<HistoryLog sessions={userSessions} onStopSession={handleStopSession} />} />
            <Route path="/profile" element={<Profile logs={logs} contacts={[]} currentUser={currentUser} onClearLogs={handleClearLogs} onClearContacts={() => {}} onNavigate={handleLegacyNavigate} />} />
            <Route path="/admin" element={<Admin apiNodes={apiNodes} disabledNodes={disabledNodes} currentUser={currentUser} logs={logs} toggleNode={handleToggleNode} onUpdateNode={handleUpdateNode} onAddNode={handleAddNode} onDeleteNode={handleDeleteNode} onLogout={() => navigate('/profile')} />} />
         </Route>

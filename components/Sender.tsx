@@ -35,6 +35,24 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     }
   }, [consoleLogs]);
 
+  // Cleanup on unmount (navigating away)
+  useEffect(() => {
+     return () => {
+         if (abortControllerRef.current) {
+             console.log("Component unmounting, aborting attack...");
+             abortControllerRef.current.abort();
+         }
+         if (activeSessionId.current && !isCloudMode && db) {
+             // Attempt to update status to stopped if we are leaving (local mode only)
+             // Fire-and-forget update
+             updateDoc(doc(db, 'active_sessions', activeSessionId.current), {
+                 status: 'stopped',
+                 lastUpdate: new Date()
+             }).catch(err => console.error("Failed to update session status on unmount", err));
+         }
+     };
+  }, [isCloudMode]); // specific to mode, though mostly for local
+
   const getDelay = () => {
     if (speed === 'slow') return 3000;
     if (speed === 'fast') return 800;
