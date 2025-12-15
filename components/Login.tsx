@@ -45,6 +45,7 @@ const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess, onGuestLogin 
           uid: foundUser.uid,
           username: foundUser.username,
           email: foundUser.email,
+          phone: foundUser.phone,
           role: foundUser.role || 'user',
           createdAt: foundUser.createdAt
       };
@@ -97,7 +98,16 @@ const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess, onGuestLogin 
              </div>
 
              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Password</label>
+                <div className="flex justify-between items-center px-1">
+                   <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Password</label>
+                   <button 
+                     type="button" 
+                     onClick={() => onNavigate(AppView.FORGOT_PASSWORD)}
+                     className="text-[10px] text-blue-500 hover:text-blue-400 font-bold"
+                   >
+                     Forgot?
+                   </button>
+                </div>
                 <div className="relative">
                    <Key className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
                    <input 

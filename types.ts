@@ -35,6 +35,7 @@ export interface ApiNode {
 export interface UserProfile {
   uid: string;
   email: string | null;
+  phone?: string; // Added phone field
   username: string;
   role: 'user' | 'admin';
   createdAt: any;
@@ -58,6 +59,7 @@ export enum AppView {
   LANDING = 'LANDING',
   LOGIN = 'LOGIN',
   REGISTER = 'REGISTER',
+  FORGOT_PASSWORD = 'FORGOT_PASSWORD', // Added view
   HOME = 'HOME',
   SEND = 'SEND',
   PROTECTOR = 'PROTECTOR',

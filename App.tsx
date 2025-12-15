@@ -27,6 +27,7 @@ import Disclaimer from './components/Disclaimer';
 import Landing from './components/Landing';
 import Login from './components/Login';
 import Register from './components/Register';
+import ForgotPassword from './components/ForgotPassword';
 import { db, isFirebaseConfigured, collections } from './firebase';
 
 // Mock Data
@@ -168,6 +169,7 @@ function AppContent() {
       case AppView.ADMIN: navigate('/admin'); break;
       case AppView.LOGIN: navigate('/login'); break;
       case AppView.REGISTER: navigate('/register'); break;
+      case AppView.FORGOT_PASSWORD: navigate('/forgot-password'); break;
       case AppView.LANDING: navigate('/'); break;
       default: navigate('/home');
     }
@@ -380,6 +382,7 @@ function AppContent() {
            <Route path="/" element={currentUser ? <Navigate to="/home" /> : <Landing onNavigate={handleLegacyNavigate} />} />
            <Route path="/login" element={currentUser ? <Navigate to="/home" /> : <Login onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />} />
            <Route path="/register" element={currentUser ? <Navigate to="/home" /> : <Register onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />} />
+           <Route path="/forgot-password" element={<ForgotPassword onNavigate={handleLegacyNavigate} />} />
         </Route>
 
         {/* Protected Routes */}

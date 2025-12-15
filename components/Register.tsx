@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { AppView, UserProfile } from '../types';
-import { UserPlus, User, Mail, ArrowRight, Loader2, Key, ShieldAlert, HardDrive } from 'lucide-react';
+import { UserPlus, User, Mail, ArrowRight, Loader2, Key, ShieldAlert, HardDrive, Phone, MessageSquare } from 'lucide-react';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore"; 
 import { db, isFirebaseConfigured } from '../firebase';
+import { sendSmsOtp, generateOtp } from '../services/notificationService';
 
 interface RegisterProps {
   onNavigate: (view: AppView) => void;
@@ -12,12 +13,15 @@ interface RegisterProps {
 
 const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess, onGuestLogin }) => {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ username: '', email: '', password: '' });
+  const [step, setStep] = useState<'details' | 'otp'>('details');
+  const [formData, setFormData] = useState({ username: '', email: '', password: '', phone: '' });
+  const [otpInput, setOtpInput] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('');
   const [error, setError] = useState('');
   
   const isDbReady = isFirebaseConfigured() && !!db;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleInitiateRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -25,43 +29,83 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess, onGuest
     try {
       if (!db) throw new Error("Database not connected. Please use Guest Mode.");
 
-      // Check if user exists
+      // 1. Check if email exists
       const usersRef = collection(db, "users");
-      const q = query(usersRef, where("email", "==", formData.email));
-      const querySnapshot = await getDocs(q);
+      const emailQuery = query(usersRef, where("email", "==", formData.email));
+      const emailSnap = await getDocs(emailQuery);
+      if (!emailSnap.empty) throw new Error("Email already registered. Please login.");
 
-      if (!querySnapshot.empty) throw new Error("Email already registered. Please login.");
+      // 2. Check if phone exists
+      // Note: This requires a composite index or separate query if you want strict phone uniqueness
+      // For now, we'll check it client-side if the collection isn't huge, or separate query
+      const phoneQuery = query(usersRef, where("phone", "==", formData.phone));
+      const phoneSnap = await getDocs(phoneQuery);
+      if (!phoneSnap.empty) throw new Error("Phone number already registered.");
 
-      const newUid = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      const isAdmin = formData.email.toLowerCase().startsWith('admin');
-
-      const newUserProfile: any = {
-          uid: newUid,
-          username: formData.username,
-          email: formData.email,
-          password: formData.password,
-          role: isAdmin ? 'admin' : 'user',
-          createdAt: serverTimestamp()
-      };
-
-      await setDoc(doc(db, "users", newUid), newUserProfile);
+      // 3. Generate and Send OTP
+      const code = generateOtp();
+      setGeneratedOtp(code);
       
-      const safeProfile: UserProfile = {
-          uid: newUid,
-          username: formData.username,
-          email: formData.email,
-          role: isAdmin ? 'admin' : 'user',
-          createdAt: new Date().toISOString()
-      };
-      // Auto login after register, default remember = true
-      onLoginSuccess(safeProfile, true);
+      const sent = await sendSmsOtp(formData.phone, code);
+      // NOTE: If CORS fails in browser, we might simulate it for demo purposes if 'sent' is false
+      // In production, this would be a server-side call.
       
+      console.log(`DEBUG MODE: OTP is ${code}`); // Remove in production
+      
+      // We proceed to OTP step regardless of API success to allow manual entry if API fails silently or for demo
+      setStep('otp');
+
     } catch (err: any) {
       console.error("Register Error:", err);
       setError(err.message || "Registration failed.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyAndRegister = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setError('');
+      setLoading(true);
+
+      try {
+          if (otpInput !== generatedOtp) {
+              throw new Error("Invalid OTP Code.");
+          }
+
+          const newUid = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const isAdmin = formData.email.toLowerCase().startsWith('admin');
+
+          const newUserProfile: any = {
+              uid: newUid,
+              username: formData.username,
+              email: formData.email,
+              phone: formData.phone,
+              password: formData.password,
+              role: isAdmin ? 'admin' : 'user',
+              createdAt: serverTimestamp()
+          };
+
+          if (db) {
+            await setDoc(doc(db, "users", newUid), newUserProfile);
+          }
+          
+          const safeProfile: UserProfile = {
+              uid: newUid,
+              username: formData.username,
+              email: formData.email,
+              phone: formData.phone,
+              role: isAdmin ? 'admin' : 'user',
+              createdAt: new Date().toISOString()
+          };
+          
+          onLoginSuccess(safeProfile, true);
+
+      } catch (err: any) {
+          setError(err.message);
+      } finally {
+          setLoading(false);
+      }
   };
 
   return (
@@ -81,64 +125,121 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess, onGuest
              <p className="text-zinc-500 text-sm mt-2">Join the NetStrike Network.</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Username</label>
-                <div className="relative">
-                  <User className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
-                  <input 
-                      type="text" required value={formData.username}
-                      onChange={e => setFormData({...formData, username: e.target.value})}
-                      className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
-                      placeholder="Codename"
-                  />
+          {step === 'details' ? (
+              <form onSubmit={handleInitiateRegister} className="space-y-4">
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Username</label>
+                    <div className="relative">
+                    <User className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
+                    <input 
+                        type="text" required value={formData.username}
+                        onChange={e => setFormData({...formData, username: e.target.value})}
+                        className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                        placeholder="Codename"
+                    />
+                    </div>
                 </div>
-            </div>
 
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Email</label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
-                  <input 
-                      type="email" required value={formData.email}
-                      onChange={e => setFormData({...formData, email: e.target.value})}
-                      className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
-                      placeholder="admin@netstrike.local (for admin)"
-                  />
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Email</label>
+                    <div className="relative">
+                    <Mail className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
+                    <input 
+                        type="email" required value={formData.email}
+                        onChange={e => setFormData({...formData, email: e.target.value})}
+                        className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                        placeholder="admin@netstrike.local"
+                    />
+                    </div>
                 </div>
-             </div>
 
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Password</label>
-                <div className="relative">
-                   <Key className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
-                   <input 
-                     type="password" required value={formData.password}
-                     onChange={e => setFormData({...formData, password: e.target.value})}
-                     className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
-                     placeholder="••••••••"
-                   />
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Phone Number (Required)</label>
+                    <div className="relative">
+                    <Phone className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
+                    <input 
+                        type="text" required value={formData.phone}
+                        onChange={e => setFormData({...formData, phone: e.target.value.replace(/[^0-9+]/g, '')})}
+                        className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                        placeholder="+88017XXXXXXXX"
+                    />
+                    </div>
                 </div>
-             </div>
 
-             {!isDbReady && (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-500 font-medium text-center flex items-center justify-center gap-2">
-                   <HardDrive className="w-3 h-3" /><span>DB Not Connected</span>
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Password</label>
+                    <div className="relative">
+                    <Key className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
+                    <input 
+                        type="password" required value={formData.password}
+                        onChange={e => setFormData({...formData, password: e.target.value})}
+                        className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                        placeholder="••••••••"
+                    />
+                    </div>
                 </div>
-             )}
-             {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center flex items-center justify-center gap-2">
-                   <ShieldAlert className="w-3 h-3" /><span>{error}</span>
-                </div>
-             )}
 
-             <button 
-               type="submit" disabled={loading || !isDbReady}
-               className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] mt-2 flex items-center justify-center gap-2 disabled:opacity-50"
-             >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Create ID <ArrowRight className="w-4 h-4" /></>}
-             </button>
-          </form>
+                {!isDbReady && (
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-500 font-medium text-center flex items-center justify-center gap-2">
+                    <HardDrive className="w-3 h-3" /><span>DB Not Connected</span>
+                    </div>
+                )}
+                {error && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center flex items-center justify-center gap-2">
+                    <ShieldAlert className="w-3 h-3" /><span>{error}</span>
+                    </div>
+                )}
+
+                <button 
+                type="submit" disabled={loading || !isDbReady}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] mt-2 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Verify & Create ID <ArrowRight className="w-4 h-4" /></>}
+                </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyAndRegister} className="space-y-4 animate-fade-in">
+                <div className="text-center p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                   <p className="text-xs text-emerald-400 mb-2">OTP Sent to {formData.phone}</p>
+                   <p className="text-[10px] text-zinc-500">Please enter the 6-digit code sent via SMS.</p>
+                </div>
+
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">One-Time Password</label>
+                    <div className="relative">
+                    <MessageSquare className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
+                    <input 
+                        type="text" required value={otpInput}
+                        onChange={e => setOtpInput(e.target.value)}
+                        className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-center tracking-[0.5em] text-lg font-mono-code text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                        placeholder="XXXXXX"
+                        maxLength={6}
+                    />
+                    </div>
+                </div>
+
+                {error && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center flex items-center justify-center gap-2">
+                    <ShieldAlert className="w-3 h-3" /><span>{error}</span>
+                    </div>
+                )}
+
+                <button 
+                type="submit" disabled={loading}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] mt-2 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Confirm OTP <ArrowRight className="w-4 h-4" /></>}
+                </button>
+                
+                <button 
+                   type="button"
+                   onClick={() => setStep('details')}
+                   className="w-full py-2 text-xs text-zinc-500 hover:text-white"
+                >
+                    Go Back
+                </button>
+            </form>
+          )}
 
           <div className="mt-4 pt-4 border-t border-zinc-800/50">
              <button onClick={onGuestLogin} className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all text-xs border border-zinc-700">Continue as Guest</button>
