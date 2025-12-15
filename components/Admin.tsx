@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ApiNode, UserProfile, LogEntry } from '../types';
-import { ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, Database, Users, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ApiNode, UserProfile, LogEntry, ActiveSession } from '../types';
+import { ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, Database, Users, FileText, CheckCircle2, AlertCircle, PlayCircle, StopCircle, RefreshCw } from 'lucide-react';
 import { INITIAL_API_NODES } from '../apiNodes';
-import { collection, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
 interface AdminProps {
@@ -28,12 +28,15 @@ const Admin: React.FC<AdminProps> = ({
   onDeleteNode,
   onLogout 
 }) => {
-  const [activeTab, setActiveTab] = useState<'gateways' | 'users' | 'logs'>('gateways');
+  const [activeTab, setActiveTab] = useState<'live' | 'gateways' | 'users' | 'logs'>('live');
   const [searchTerm, setSearchTerm] = useState('');
   
   // User Management State
   const [users, setUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // Live Sessions State
+  const [liveSessions, setLiveSessions] = useState<ActiveSession[]>([]);
 
   // API Modal State
   const [editingNode, setEditingNode] = useState<ApiNode | null>(null);
@@ -59,6 +62,24 @@ const Admin: React.FC<AdminProps> = ({
         };
         fetchUsers();
     }
+  }, [activeTab]);
+
+  // FETCH LIVE SESSIONS EFFECT
+  useEffect(() => {
+      if (activeTab === 'live' && db) {
+          // Listen for sessions updated in the last 24 hours
+          const q = query(collection(db, 'active_sessions'), orderBy('lastUpdate', 'desc'));
+          const unsubscribe = onSnapshot(q, (snapshot) => {
+              const sessions = snapshot.docs.map(d => ({id: d.id, ...d.data()} as ActiveSession));
+              // Filter out very old completed sessions (keep them for a bit for history)
+              setLiveSessions(sessions.filter(s => {
+                  if (s.status === 'running') return true;
+                  const age = new Date().getTime() - (s.lastUpdate?.toDate ? s.lastUpdate.toDate().getTime() : new Date(s.lastUpdate).getTime());
+                  return age < 300000; // Keep stopped sessions for 5 mins
+              }));
+          });
+          return () => unsubscribe();
+      }
   }, [activeTab]);
 
   if (!currentUser || currentUser.role !== 'admin') {
@@ -104,6 +125,16 @@ const Admin: React.FC<AdminProps> = ({
     }
   };
 
+  // SESSION HANDLER
+  const handleStopSession = async (sessionId: string) => {
+      if (db) {
+          await updateDoc(doc(db, 'active_sessions', sessionId), {
+              status: 'stopped',
+              lastUpdate: new Date()
+          });
+      }
+  };
+
   // USER HANDLERS
   const handleDeleteUser = async (userId: string) => {
       if (!confirm("Permanently delete this user?")) return;
@@ -138,15 +169,16 @@ const Admin: React.FC<AdminProps> = ({
        </div>
 
        {/* TABS */}
-       <div className="flex p-1 bg-zinc-900 rounded-lg border border-zinc-800">
-           {(['gateways', 'users', 'logs'] as const).map(tab => (
+       <div className="flex p-1 bg-zinc-900 rounded-lg border border-zinc-800 overflow-x-auto">
+           {(['live', 'gateways', 'users', 'logs'] as const).map(tab => (
                <button
                  key={tab}
                  onClick={() => { setActiveTab(tab); setSearchTerm(''); }}
-                 className={`flex-1 py-2 rounded-md text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+                 className={`flex-1 py-2 px-3 rounded-md text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all min-w-[80px] ${
                      activeTab === tab ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'
                  }`}
                >
+                   {tab === 'live' && <Activity className="w-3 h-3 text-red-500" />}
                    {tab === 'gateways' && <Server className="w-3 h-3" />}
                    {tab === 'users' && <Users className="w-3 h-3" />}
                    {tab === 'logs' && <FileText className="w-3 h-3" />}
@@ -154,6 +186,70 @@ const Admin: React.FC<AdminProps> = ({
                </button>
            ))}
        </div>
+
+       {/* --- LIVE OPS TAB --- */}
+       {activeTab === 'live' && (
+           <div className="space-y-4 animate-fade-in">
+               <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl">
+                      <h3 className="text-xs font-bold text-red-400 uppercase">Active Attacks</h3>
+                      <p className="text-2xl font-mono-code text-white">{liveSessions.filter(s => s.status === 'running').length}</p>
+                  </div>
+                  <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+                      <h3 className="text-xs font-bold text-zinc-500 uppercase">Total Load</h3>
+                      <p className="text-2xl font-mono-code text-white">{liveSessions.filter(s => s.status === 'running').reduce((acc, curr) => acc + (curr.amount || 0), 0)}</p>
+                  </div>
+               </div>
+
+               <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                   <div className="p-3 border-b border-zinc-800 flex justify-between items-center">
+                       <span className="text-xs font-bold text-zinc-400">SESSION MONITOR</span>
+                       <RefreshCw className="w-3 h-3 text-zinc-600 animate-spin" style={{animationDuration: '3s'}} />
+                   </div>
+                   
+                   {liveSessions.length === 0 ? (
+                       <div className="p-8 text-center text-xs text-zinc-600">No active operations detected.</div>
+                   ) : (
+                       <div className="divide-y divide-zinc-800">
+                           {liveSessions.map(session => (
+                               <div key={session.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/30">
+                                   <div className="flex items-center gap-3">
+                                       <div className={`w-2 h-2 rounded-full ${session.status === 'running' ? 'bg-red-500 animate-pulse' : 'bg-zinc-500'}`}></div>
+                                       <div>
+                                           <div className="flex items-center gap-2">
+                                               <span className="font-bold text-white text-sm">{session.target}</span>
+                                               <span className="text-[9px] px-1.5 rounded bg-zinc-800 text-zinc-400 font-mono-code">{session.username}</span>
+                                           </div>
+                                           <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1 font-mono-code">
+                                               <span>REQ: {session.sent}/{session.amount}</span>
+                                               <span className="text-red-500/80">FAIL: {session.failed}</span>
+                                               <span>STATUS: {session.status.toUpperCase()}</span>
+                                           </div>
+                                            {/* Progress Bar */}
+                                            {session.status === 'running' && (
+                                                <div className="w-24 h-1 bg-zinc-800 mt-2 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-red-500" style={{ width: `${Math.min(((session.sent + session.failed) / session.amount) * 100, 100)}%` }}></div>
+                                                </div>
+                                            )}
+                                       </div>
+                                   </div>
+                                   
+                                   {session.status === 'running' && (
+                                       <button 
+                                         onClick={() => handleStopSession(session.id)}
+                                         className="p-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded hover:bg-red-500 hover:text-white transition-all"
+                                         title="Kill Process"
+                                       >
+                                           <StopCircle className="w-5 h-5" />
+                                       </button>
+                                   )}
+                               </div>
+                           ))}
+                       </div>
+                   )}
+               </div>
+           </div>
+       )}
 
        {/* --- GATEWAYS TAB --- */}
        {activeTab === 'gateways' && (

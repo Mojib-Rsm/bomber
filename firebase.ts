@@ -41,5 +41,6 @@ export const collections = {
   contacts: (db: any) => collection(db, "contacts"),
   nodes: (db: any) => collection(db, "api_nodes"),
   protected: (db: any) => collection(db, "protected_numbers"),
-  users: (db: any) => collection(db, "users")
+  users: (db: any) => collection(db, "users"),
+  sessions: (db: any) => collection(db, "active_sessions")
 };

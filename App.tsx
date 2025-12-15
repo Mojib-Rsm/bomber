@@ -365,7 +365,7 @@ function AppContent() {
         {/* Protected Routes */}
         <Route element={currentUser ? <MainLayout currentUser={currentUser} handleLogout={handleLogout} /> : <Navigate to="/" />}>
            <Route path="/home" element={<Home onNavigate={handleLegacyNavigate} nodeCount={activeNodes.length} />} />
-           <Route path="/bomber" element={<Sender templates={INITIAL_TEMPLATES} onSend={handleSendLog} protectedNumbers={protectedNumbers} activeNodes={activeNodes} />} />
+           <Route path="/bomber" element={<Sender templates={INITIAL_TEMPLATES} onSend={handleSendLog} protectedNumbers={protectedNumbers} activeNodes={activeNodes} currentUser={currentUser} />} />
            <Route path="/protector" element={<Protector protectedNumbers={protectedNumbers} onAdd={handleAddProtectedNumber} onRemove={handleRemoveProtectedNumber} />} />
            <Route path="/logs" element={<HistoryLog logs={logs} />} />
            <Route path="/profile" element={<Profile logs={logs} contacts={[]} currentUser={currentUser} onClearLogs={handleClearLogs} onClearContacts={() => {}} onNavigate={handleLegacyNavigate} />} />

