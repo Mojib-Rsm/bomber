@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { ApiNode } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ApiNode, UserProfile } from '../types';
 import { ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, Database, RotateCcw } from 'lucide-react';
 import { INITIAL_API_NODES } from '../apiNodes';
 
 interface AdminProps {
   apiNodes: ApiNode[];
   disabledNodes: string[];
+  currentUser: UserProfile | null;
   toggleNode: (name: string) => void;
   onUpdateNode: (node: ApiNode) => void;
   onAddNode: (node: ApiNode) => void;
@@ -16,15 +17,13 @@ interface AdminProps {
 const Admin: React.FC<AdminProps> = ({ 
   apiNodes, 
   disabledNodes, 
+  currentUser,
   toggleNode, 
   onUpdateNode,
   onAddNode,
   onDeleteNode,
   onLogout 
 }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modal State
@@ -42,16 +41,19 @@ const Admin: React.FC<AdminProps> = ({
     body: '{}'
   });
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password === 'admin') {
-      setIsAuthenticated(true);
-      setError('');
-    } else {
-      setError('ACCESS DENIED');
-      setPassword('');
-    }
-  };
+  if (!currentUser || currentUser.role !== 'admin') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] p-5 animate-fade-in">
+        <div className="bg-zinc-900 border border-red-900/50 p-8 rounded-2xl w-full max-w-sm relative overflow-hidden text-center">
+           <div className="absolute top-0 left-0 w-full h-1 bg-red-600"></div>
+           <ShieldAlert className="w-12 h-12 text-red-500 mx-auto mb-4" />
+           <h2 className="text-xl font-bold text-white mb-2 tracking-wider">ACCESS DENIED</h2>
+           <p className="text-xs text-zinc-500 font-mono-code mb-6">You do not have administrative privileges.</p>
+           <button onClick={onLogout} className="text-red-500 text-xs font-bold hover:underline">Return to Profile</button>
+        </div>
+      </div>
+    );
+  }
 
   const openAddModal = () => {
     setFormData({
@@ -105,57 +107,6 @@ const Admin: React.FC<AdminProps> = ({
   const activeCount = apiNodes.length - disabledNodes.length;
   const health = apiNodes.length > 0 ? Math.round((activeCount / apiNodes.length) * 100) : 0;
 
-  if (!isAuthenticated) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] p-5 animate-fade-in">
-        <div className="bg-zinc-900 border border-red-900/50 p-8 rounded-2xl w-full max-w-sm relative overflow-hidden">
-           <div className="absolute top-0 left-0 w-full h-1 bg-red-600"></div>
-           
-           <div className="flex justify-center mb-6">
-              <div className="p-4 bg-red-500/10 rounded-full border border-red-500/20">
-                <Lock className="w-8 h-8 text-red-500" />
-              </div>
-           </div>
-           
-           <h2 className="text-xl font-bold text-center text-white mb-1 tracking-wider">RESTRICTED AREA</h2>
-           <p className="text-xs text-center text-zinc-500 font-mono-code mb-6">AUTHORIZED PERSONNEL ONLY</p>
-
-           <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-1">
-                 <input 
-                   type="password" 
-                   value={password}
-                   onChange={(e) => setPassword(e.target.value)}
-                   placeholder="ENTER SECURITY TOKEN"
-                   className="w-full bg-black border border-zinc-800 text-center py-3 text-white font-mono-code tracking-[0.3em] text-sm focus:border-red-500 outline-none rounded-lg transition-colors placeholder-zinc-700"
-                   autoFocus
-                 />
-              </div>
-
-              <div className="text-center">
-                 <p className="text-[9px] text-zinc-600">
-                    ADMIN KEY HINT: <code className="text-zinc-500 hover:text-red-500 transition-colors cursor-help">admin</code>
-                 </p>
-              </div>
-              
-              {error && (
-                <div className="text-[10px] text-red-500 text-center font-bold animate-pulse">
-                  {error}
-                </div>
-              )}
-
-              <button 
-                type="submit"
-                className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-lg text-xs uppercase tracking-widest transition-all"
-              >
-                Unlock Console
-              </button>
-           </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-5 pb-20 space-y-6 animate-fade-in relative">
        {/* Header */}
@@ -169,7 +120,7 @@ const Admin: React.FC<AdminProps> = ({
                 <span className="text-[10px] text-zinc-500 font-mono-code">ROOT_ACCESS_GRANTED</span>
              </div>
           </div>
-          <button onClick={() => { setIsAuthenticated(false); onLogout(); }} className="text-zinc-500 hover:text-white">
+          <button onClick={onLogout} className="text-zinc-500 hover:text-white">
              <Lock className="w-4 h-4" />
           </button>
        </div>
@@ -233,7 +184,7 @@ const Admin: React.FC<AdminProps> = ({
             />
           </div>
 
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-800">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-800 max-h-[400px] overflow-y-auto">
              {apiNodes.length === 0 ? (
                 <div className="p-8 text-center text-zinc-500">
                     <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />

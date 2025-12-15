@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { AppView } from '../types';
-import { Lock, User, Mail, ArrowRight, Loader2, Key } from 'lucide-react';
+import { Lock, User, Mail, ArrowRight, Loader2, Key, AlertCircle } from 'lucide-react';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore"; 
+import { auth, db } from '../firebase';
 
 interface AuthProps {
   view: AppView; // LOGIN or REGISTER
   onNavigate: (view: AppView) => void;
-  onLogin: (user: any) => void;
+  onLoginSuccess: () => void;
 }
 
-const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLogin }) => {
+const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
@@ -22,43 +25,40 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLogin }) => {
     setError('');
     setLoading(true);
 
-    // Simulate Network Delay
-    await new Promise(r => setTimeout(r, 1000));
-
     try {
-      // Hardcoded Demo Logic
-      if (view === AppView.LOGIN && formData.username === 'demo' && formData.password === 'demo') {
-         onLogin({ id: 'demo_user', username: 'demo', email: 'demo@netstrike.local' });
-         return;
-      }
+      if (!auth) throw new Error("Firebase Auth not initialized. Check configuration.");
 
-      const users = JSON.parse(localStorage.getItem('netstrike_users') || '[]');
-      
       if (view === AppView.REGISTER) {
-        if (users.find((u: any) => u.username === formData.username)) {
-          throw new Error("Username already taken");
-        }
-        const newUser = { 
-            id: Date.now(), 
-            username: formData.username, 
-            email: formData.email,
-            password: formData.password // In real app, hash this!
-        };
-        users.push(newUser);
-        localStorage.setItem('netstrike_users', JSON.stringify(users));
-        onLogin(newUser);
+        // Register Flow
+        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        const user = userCredential.user;
+
+        // Create User Profile in Firestore
+        await setDoc(doc(db, "users", user.uid), {
+          uid: user.uid,
+          username: formData.username,
+          email: formData.email,
+          role: 'user', // Default role
+          createdAt: serverTimestamp()
+        });
+
+        // Update Display Name
+        await updateProfile(user, { displayName: formData.username });
+        
       } else {
-        const user = users.find((u: any) => 
-            u.username === formData.username && u.password === formData.password
-        );
-        if (user) {
-            onLogin(user);
-        } else {
-            throw new Error("Invalid credentials");
-        }
+        // Login Flow
+        await signInWithEmailAndPassword(auth, formData.email, formData.password);
       }
+      
+      onLoginSuccess();
     } catch (err: any) {
-      setError(err.message);
+      console.error("Auth Error:", err);
+      let msg = "Authentication failed.";
+      if (err.code === 'auth/invalid-credential') msg = "Invalid email or password.";
+      if (err.code === 'auth/email-already-in-use') msg = "Email already in use.";
+      if (err.code === 'auth/weak-password') msg = "Password should be at least 6 characters.";
+      setError(msg);
+    } finally {
       setLoading(false);
     }
   };
@@ -88,37 +88,37 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLogin }) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Username</label>
-                <div className="relative">
-                   <User className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
-                   <input 
-                     type="text"
-                     required
-                     value={formData.username}
-                     onChange={e => setFormData({...formData, username: e.target.value})}
-                     className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
-                     placeholder="codename"
-                   />
-                </div>
-             </div>
-
              {view === AppView.REGISTER && (
                  <div className="space-y-1.5 animate-fade-in">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Email</label>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Username</label>
                     <div className="relative">
-                    <Mail className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
-                    <input 
-                        type="email"
-                        required
-                        value={formData.email}
-                        onChange={e => setFormData({...formData, email: e.target.value})}
-                        className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
-                        placeholder="secure@netstrike.io"
-                    />
+                      <User className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
+                      <input 
+                          type="text"
+                          required
+                          value={formData.username}
+                          onChange={e => setFormData({...formData, username: e.target.value})}
+                          className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
+                          placeholder="codename"
+                      />
                     </div>
                 </div>
              )}
+
+             <div className="space-y-1.5 animate-fade-in">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 w-4 h-4 text-zinc-600" />
+                  <input 
+                      type="email"
+                      required
+                      value={formData.email}
+                      onChange={e => setFormData({...formData, email: e.target.value})}
+                      className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
+                      placeholder="secure@netstrike.io"
+                  />
+                </div>
+             </div>
 
              <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Password</label>
@@ -135,16 +135,9 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLogin }) => {
                 </div>
              </div>
 
-             {view === AppView.LOGIN && (
-               <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-lg p-2 text-center mt-2">
-                  <p className="text-[10px] text-zinc-400">
-                    <span className="font-bold text-emerald-500">DEMO ACCESS:</span> Username: <code className="text-white">demo</code> / Password: <code className="text-white">demo</code>
-                  </p>
-               </div>
-             )}
-
              {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center animate-pulse">
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center animate-pulse flex items-center justify-center gap-2">
+                   <AlertCircle className="w-3 h-3" />
                    {error}
                 </div>
              )}

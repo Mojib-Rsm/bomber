@@ -19,6 +19,8 @@ export interface LogEntry {
   message: string;
   status: 'sent' | 'failed' | 'queued';
   timestamp: Date;
+  userId?: string;
+  username?: string;
 }
 
 export interface ApiNode {
@@ -28,6 +30,14 @@ export interface ApiNode {
   method: string;
   headers: string; // Stored as JSON string for easy editing
   body: string; // Template string with placeholders
+}
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  username: string;
+  role: 'user' | 'admin';
+  createdAt: any;
 }
 
 export enum AppView {

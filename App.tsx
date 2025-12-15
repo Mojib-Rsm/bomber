@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home as HomeIcon, Zap, User, LayoutList, ShieldCheck, Settings, LogOut } from 'lucide-react';
+import { Home as HomeIcon, Zap, User, LayoutList, ShieldCheck, Settings, LogOut, Loader2 } from 'lucide-react';
 import { 
   collection, 
   addDoc, 
@@ -10,9 +10,12 @@ import {
   doc, 
   writeBatch, 
   getDocs, 
-  setDoc 
+  setDoc,
+  where,
+  getDoc
 } from "firebase/firestore";
-import { AppView, MessageTemplate, LogEntry, ApiNode } from './types';
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { AppView, MessageTemplate, LogEntry, ApiNode, UserProfile } from './types';
 import { INITIAL_API_NODES } from './apiNodes';
 import Sender from './components/Sender';
 import HistoryLog from './components/HistoryLog';
@@ -21,7 +24,9 @@ import Home from './components/Home';
 import Profile from './components/Profile';
 import Admin from './components/Admin';
 import Disclaimer from './components/Disclaimer';
-import { db, isFirebaseConfigured, collections } from './firebase';
+import Landing from './components/Landing';
+import Auth from './components/Auth';
+import { db, auth, isFirebaseConfigured, collections } from './firebase';
 
 // Mock Data
 const INITIAL_TEMPLATES: MessageTemplate[] = [
@@ -40,33 +45,83 @@ const loadFromStorage = <T,>(key: string, defaultVal: T): T => {
 };
 
 export default function App() {
-  // Default to SEND view (Bombing Page) directly
-  const [currentView, setCurrentView] = useState<AppView>(AppView.SEND);
+  const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
   const [showDisclaimer, setShowDisclaimer] = useState(true);
+  
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
-  // Local Storage / State
+  // App State
   const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
   const [disabledNodes, setDisabledNodes] = useState<string[]>(() => loadFromStorage('disabled_nodes', []));
-  
-  // CHANGED KEY to 'netstrike_nodes_v5' to force reload the HTTPS APIs
   const [apiNodes, setApiNodes] = useState<ApiNode[]>(() => loadFromStorage('netstrike_nodes_v5', INITIAL_API_NODES));
   const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
   
-  // Check connection status based on Firebase config presence
   const isDbConnected = isFirebaseConfigured();
+
+  // AUTH LISTENER
+  useEffect(() => {
+    if (auth && db) {
+      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        if (firebaseUser) {
+          // Fetch user profile from Firestore to get Role
+          const userDocRef = doc(db, "users", firebaseUser.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (userDoc.exists()) {
+             setCurrentUser(userDoc.data() as UserProfile);
+          } else {
+             // Fallback if doc missing (should not happen with register flow)
+             const newProfile: UserProfile = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                username: firebaseUser.displayName || 'User',
+                role: 'user',
+                createdAt: new Date()
+             };
+             setCurrentUser(newProfile);
+          }
+          
+          // Redirect to Home if on Landing/Login/Register
+          if ([AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
+              setCurrentView(AppView.HOME);
+          }
+        } else {
+          setCurrentUser(null);
+          // If not logged in, force Landing or Auth pages
+          if (![AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
+              setCurrentView(AppView.LANDING);
+          }
+        }
+        setAuthLoading(false);
+      });
+      return () => unsubscribe();
+    } else {
+      setAuthLoading(false);
+    }
+  }, [currentView]); // Check view on auth change
 
   useEffect(() => {
     const accepted = localStorage.getItem('disclaimer_accepted');
     if (accepted === 'true') setShowDisclaimer(false);
   }, []);
 
-  // FIRESTORE SYNC
+  // FIRESTORE SYNC (LOGS & PROTECTED)
   useEffect(() => {
-    if (isDbConnected && db) {
-      console.log("Subscribing to Firestore...");
+    if (isDbConnected && db && currentUser) {
+      console.log("Subscribing to Firestore Data...");
 
-      // Sync Logs
-      const qLogs = query(collections.logs(db), orderBy("timestamp", "desc"));
+      // 1. Logs Sync (Role Based)
+      // Admin sees ALL logs. User sees only THEIR logs.
+      let qLogs;
+      if (currentUser.role === 'admin') {
+         qLogs = query(collections.logs(db), orderBy("timestamp", "desc"));
+      } else {
+         // Note: Requires Firestore Index for 'userId' + 'timestamp'
+         qLogs = query(collections.logs(db), where("userId", "==", currentUser.uid), orderBy("timestamp", "desc"));
+      }
+
       const unsubLogs = onSnapshot(qLogs, (snapshot) => {
         const firebaseLogs = snapshot.docs.map(doc => {
           const data = doc.data();
@@ -77,9 +132,15 @@ export default function App() {
           } as LogEntry;
         });
         setLogs(firebaseLogs);
-      }, (err) => console.error("Logs sync error:", err));
+      }, (err) => {
+          // Fallback if index missing or permission error
+          console.error("Logs sync error:", err);
+          if (err.message.includes("index")) {
+             console.warn("Please create Firestore Index: logs > userId Asc + timestamp Desc");
+          }
+      });
 
-      // Sync Protected Numbers
+      // 2. Sync Protected Numbers
       const qProt = collection(db, "protected_numbers");
       const unsubProt = onSnapshot(qProt, (snapshot) => {
          const nums = snapshot.docs.map(doc => doc.data().phone as string);
@@ -90,56 +151,58 @@ export default function App() {
         unsubLogs();
         unsubProt();
       };
+    } else if (!currentUser) {
+       setLogs([]); // Clear logs on logout
     }
-  }, [isDbConnected]);
+  }, [isDbConnected, currentUser]);
 
-  // Sync Local Settings (Only when DB is NOT connected, or as backup)
-  useEffect(() => { 
-    if (!isDbConnected) localStorage.setItem('logs', JSON.stringify(logs)); 
-  }, [logs, isDbConnected]);
-  
+  // Sync Local Settings (Backup)
   useEffect(() => { localStorage.setItem('disabled_nodes', JSON.stringify(disabledNodes)); }, [disabledNodes]);
   useEffect(() => { localStorage.setItem('netstrike_nodes_v5', JSON.stringify(apiNodes)); }, [apiNodes]);
   
-  useEffect(() => { 
-    if (!isDbConnected) localStorage.setItem('protected_numbers', JSON.stringify(protectedNumbers)); 
-  }, [protectedNumbers, isDbConnected]);
-
   const handleAcceptDisclaimer = () => {
     localStorage.setItem('disclaimer_accepted', 'true');
     setShowDisclaimer(false);
   };
   
   const handleSendLog = async (log: LogEntry) => {
+    // Add User Context to Log
+    const logWithUser: LogEntry = {
+        ...log,
+        userId: currentUser?.uid,
+        username: currentUser?.username || 'Unknown'
+    };
+
     if (isDbConnected && db) {
         try {
             await addDoc(collections.logs(db), {
-                ...log,
+                ...logWithUser,
                 timestamp: new Date()
             });
-            // No need to setLogs, snapshot will handle it
         } catch (error) {
             console.error("Error saving log to DB:", error);
-            // Fallback UI update if DB fails
-            setLogs(prev => [log, ...prev]);
+            setLogs(prev => [logWithUser, ...prev]);
         }
     } else {
-        setLogs(prev => [log, ...prev]);
+        setLogs(prev => [logWithUser, ...prev]);
     }
   };
 
   const handleClearLogs = async () => {
-    if (isDbConnected && db) {
+    if (isDbConnected && db && currentUser) {
         try {
-            // Batch delete (not efficient for massive datasets but fine for tool usage)
-            const q = query(collections.logs(db));
+            // Delete only own logs if not admin, or all if admin (logic simplified to own/viewed)
+            // Ideally batch delete by query
+            const q = currentUser.role === 'admin' 
+                ? query(collections.logs(db)) 
+                : query(collections.logs(db), where("userId", "==", currentUser.uid));
+            
             const snapshot = await getDocs(q);
             const batch = writeBatch(db);
             snapshot.docs.forEach(doc => {
                 batch.delete(doc.ref);
             });
             await batch.commit();
-            // Snapshot will update state to empty
         } catch (error) {
             console.error("Error clearing logs DB:", error);
         }
@@ -173,10 +236,10 @@ export default function App() {
   const handleAddProtectedNumber = async (phone: string) => {
     if (isDbConnected && db) {
         try {
-            // Use phone as ID to enforce uniqueness
             await setDoc(doc(db, "protected_numbers", phone), { 
                 phone, 
-                addedAt: new Date() 
+                addedAt: new Date(),
+                addedBy: currentUser?.username || 'System'
             });
         } catch (e) { console.error("Error protecting number:", e); }
     } else {
@@ -196,12 +259,33 @@ export default function App() {
     }
   };
 
+  const handleLogout = async () => {
+     if (auth) await signOut(auth);
+     setCurrentUser(null);
+     setCurrentView(AppView.LANDING);
+  };
+
   const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
 
+  if (authLoading) {
+     return (
+        <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
+            <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+        </div>
+     );
+  }
+
+  // Unauthenticated Views
+  if (!currentUser) {
+      if (currentView === AppView.LOGIN || currentView === AppView.REGISTER) {
+          return <Auth view={currentView} onNavigate={setCurrentView} onLoginSuccess={() => { /* Handled by auth listener */ }} />;
+      }
+      return <Landing onNavigate={setCurrentView} />;
+  }
+
+  // Authenticated Views
   const renderContent = () => {
     switch (currentView) {
-      // LANDING, LOGIN, REGISTER removed from flow
-      
       case AppView.HOME: 
         return <Home onNavigate={setCurrentView} nodeCount={activeNodes.length} />;
       case AppView.SEND: 
@@ -237,6 +321,7 @@ export default function App() {
           <Admin 
             apiNodes={apiNodes} 
             disabledNodes={disabledNodes} 
+            currentUser={currentUser}
             toggleNode={handleToggleNode} 
             onUpdateNode={handleUpdateNode}
             onAddNode={handleAddNode}
@@ -245,15 +330,7 @@ export default function App() {
           />
         );
       default: 
-        // Default fallthrough to Sender as the "Main" page now
-        return (
-          <Sender 
-            templates={INITIAL_TEMPLATES} 
-            onSend={handleSendLog} 
-            protectedNumbers={protectedNumbers} 
-            activeNodes={activeNodes}
-          />
-        );
+        return <Home onNavigate={setCurrentView} nodeCount={activeNodes.length} />;
     }
   };
 
@@ -279,19 +356,33 @@ export default function App() {
       {/* Header */}
       <header className="h-14 border-b border-zinc-800 bg-[#09090b]/80 backdrop-blur-md flex items-center justify-between px-5 z-20 shrink-0 sticky top-0">
         <div 
-          onClick={() => setCurrentView(AppView.SEND)} 
+          onClick={() => setCurrentView(AppView.HOME)} 
           className="flex items-center gap-2 cursor-pointer group"
         >
             <div className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`}></div>
             <h1 className="text-lg font-bold font-display tracking-wide text-white">NETSTRIKE <span className="text-[9px] text-zinc-600 font-mono-code align-top">LOCAL</span></h1>
         </div>
         
-        <div className="flex items-center gap-2">
-          <button 
+        <div className="flex items-center gap-3">
+           <div className="hidden sm:flex flex-col items-end mr-2">
+              <span className="text-[10px] font-bold text-white">{currentUser.username}</span>
+              <span className={`text-[9px] px-1 rounded ${currentUser.role === 'admin' ? 'bg-red-500/20 text-red-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                {currentUser.role.toUpperCase()}
+              </span>
+           </div>
+           
+           <button 
             onClick={() => setCurrentView(AppView.PROFILE)}
             className={`p-2 rounded-full transition-colors ${currentView === AppView.PROFILE ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white'}`}
           >
             <Settings className="w-4 h-4" />
+          </button>
+          
+          <button 
+             onClick={handleLogout}
+             className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+          >
+             <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
