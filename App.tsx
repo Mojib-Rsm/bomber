@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Home as HomeIcon, Zap, User, LayoutList, ShieldCheck, Settings, LogOut } from 'lucide-react';
+import { 
+  collection, 
+  addDoc, 
+  query, 
+  orderBy, 
+  onSnapshot, 
+  deleteDoc, 
+  doc, 
+  writeBatch, 
+  getDocs, 
+  setDoc 
+} from "firebase/firestore";
 import { AppView, MessageTemplate, LogEntry, ApiNode } from './types';
 import { INITIAL_API_NODES } from './apiNodes';
 import Sender from './components/Sender';
@@ -9,7 +21,7 @@ import Home from './components/Home';
 import Profile from './components/Profile';
 import Admin from './components/Admin';
 import Disclaimer from './components/Disclaimer';
-import { isFirebaseConfigured } from './firebase';
+import { db, isFirebaseConfigured, collections } from './firebase';
 
 // Mock Data
 const INITIAL_TEMPLATES: MessageTemplate[] = [
@@ -32,7 +44,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<AppView>(AppView.SEND);
   const [showDisclaimer, setShowDisclaimer] = useState(true);
 
-  // Local Storage for Client-side Logs & Settings
+  // Local Storage / State
   const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
   const [disabledNodes, setDisabledNodes] = useState<string[]>(() => loadFromStorage('disabled_nodes', []));
   
@@ -48,19 +60,95 @@ export default function App() {
     if (accepted === 'true') setShowDisclaimer(false);
   }, []);
 
-  // Sync Logs & Local Settings
-  useEffect(() => { localStorage.setItem('logs', JSON.stringify(logs)); }, [logs]);
+  // FIRESTORE SYNC
+  useEffect(() => {
+    if (isDbConnected && db) {
+      console.log("Subscribing to Firestore...");
+
+      // Sync Logs
+      const qLogs = query(collections.logs(db), orderBy("timestamp", "desc"));
+      const unsubLogs = onSnapshot(qLogs, (snapshot) => {
+        const firebaseLogs = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            ...data,
+            id: doc.id,
+            timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp)
+          } as LogEntry;
+        });
+        setLogs(firebaseLogs);
+      }, (err) => console.error("Logs sync error:", err));
+
+      // Sync Protected Numbers
+      const qProt = collection(db, "protected_numbers");
+      const unsubProt = onSnapshot(qProt, (snapshot) => {
+         const nums = snapshot.docs.map(doc => doc.data().phone as string);
+         setProtectedNumbers(nums);
+      }, (err) => console.error("Protector sync error:", err));
+
+      return () => {
+        unsubLogs();
+        unsubProt();
+      };
+    }
+  }, [isDbConnected]);
+
+  // Sync Local Settings (Only when DB is NOT connected, or as backup)
+  useEffect(() => { 
+    if (!isDbConnected) localStorage.setItem('logs', JSON.stringify(logs)); 
+  }, [logs, isDbConnected]);
+  
   useEffect(() => { localStorage.setItem('disabled_nodes', JSON.stringify(disabledNodes)); }, [disabledNodes]);
   useEffect(() => { localStorage.setItem('netstrike_nodes_v5', JSON.stringify(apiNodes)); }, [apiNodes]);
-  useEffect(() => { localStorage.setItem('protected_numbers', JSON.stringify(protectedNumbers)); }, [protectedNumbers]);
+  
+  useEffect(() => { 
+    if (!isDbConnected) localStorage.setItem('protected_numbers', JSON.stringify(protectedNumbers)); 
+  }, [protectedNumbers, isDbConnected]);
 
   const handleAcceptDisclaimer = () => {
     localStorage.setItem('disclaimer_accepted', 'true');
     setShowDisclaimer(false);
   };
   
-  const handleSendLog = (log: LogEntry) => setLogs(prev => [log, ...prev]);
-  const handleClearLogs = () => { setLogs([]); localStorage.removeItem('logs'); };
+  const handleSendLog = async (log: LogEntry) => {
+    if (isDbConnected && db) {
+        try {
+            await addDoc(collections.logs(db), {
+                ...log,
+                timestamp: new Date()
+            });
+            // No need to setLogs, snapshot will handle it
+        } catch (error) {
+            console.error("Error saving log to DB:", error);
+            // Fallback UI update if DB fails
+            setLogs(prev => [log, ...prev]);
+        }
+    } else {
+        setLogs(prev => [log, ...prev]);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (isDbConnected && db) {
+        try {
+            // Batch delete (not efficient for massive datasets but fine for tool usage)
+            const q = query(collections.logs(db));
+            const snapshot = await getDocs(q);
+            const batch = writeBatch(db);
+            snapshot.docs.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+            // Snapshot will update state to empty
+        } catch (error) {
+            console.error("Error clearing logs DB:", error);
+        }
+    } else {
+        setLogs([]);
+        localStorage.removeItem('logs');
+    }
+  };
+
   const handleClearContacts = () => { localStorage.removeItem('contacts'); };
   
   const handleToggleNode = (name: string) => {
@@ -83,13 +171,29 @@ export default function App() {
   };
 
   const handleAddProtectedNumber = async (phone: string) => {
-    if (!protectedNumbers.includes(phone)) {
-        setProtectedNumbers(prev => [...prev, phone]);
+    if (isDbConnected && db) {
+        try {
+            // Use phone as ID to enforce uniqueness
+            await setDoc(doc(db, "protected_numbers", phone), { 
+                phone, 
+                addedAt: new Date() 
+            });
+        } catch (e) { console.error("Error protecting number:", e); }
+    } else {
+        if (!protectedNumbers.includes(phone)) {
+            setProtectedNumbers(prev => [...prev, phone]);
+        }
     }
   };
 
   const handleRemoveProtectedNumber = async (phone: string) => {
-    setProtectedNumbers(prev => prev.filter(num => num !== phone));
+    if (isDbConnected && db) {
+        try {
+            await deleteDoc(doc(db, "protected_numbers", phone));
+        } catch (e) { console.error("Error removing protected number:", e); }
+    } else {
+        setProtectedNumbers(prev => prev.filter(num => num !== phone));
+    }
   };
 
   const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
