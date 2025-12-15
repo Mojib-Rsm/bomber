@@ -1,11 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ApiNode, UserProfile, LogEntry, ActiveSession } from '../types';
 import { 
-  ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, 
-  Database, Users, FileText, CheckCircle2, AlertCircle, PlayCircle, StopCircle, 
-  RefreshCw, Download, Upload, Code, Cpu 
+  ShieldAlert, 
+  Server, 
+  Activity, 
+  Lock, 
+  Search, 
+  Plus, 
+  Trash2, 
+  Edit2, 
+  X, 
+  Save, 
+  Users, 
+  FileText, 
+  CheckCircle2, 
+  AlertCircle, 
+  StopCircle, 
+  RefreshCw, 
+  Download, 
+  Upload, 
+  Code, 
+  Cpu 
 } from 'lucide-react';
-import { INITIAL_API_NODES } from '../apiNodes';
 import { collection, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { executeAttackNode } from '../services/attackEngine';
@@ -49,7 +65,6 @@ const Admin: React.FC<AdminProps> = ({
   const engineAbortController = useRef<AbortController | null>(null);
 
   // API Modal State
-  const [editingNode, setEditingNode] = useState<ApiNode | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isJsonModalOpen, setIsJsonModalOpen] = useState(false);
   const [viewingJsonNode, setViewingJsonNode] = useState<ApiNode | null>(null);
