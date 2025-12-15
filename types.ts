@@ -48,7 +48,8 @@ export interface ActiveSession {
   amount: number;
   sent: number;
   failed: number;
-  status: 'running' | 'stopped' | 'completed' | 'interrupted';
+  status: 'running' | 'stopped' | 'completed' | 'interrupted' | 'queued';
+  mode?: 'local' | 'cloud'; 
   startTime: any;
   lastUpdate: any;
 }
@@ -62,5 +63,5 @@ export enum AppView {
   PROTECTOR = 'PROTECTOR',
   TEMPLATES = 'TEMPLATES',
   PROFILE = 'PROFILE',
-  ADMIN = 'ADMIN',
+  ADMIN = 'ADMIN'
 }

