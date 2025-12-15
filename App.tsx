@@ -14,7 +14,6 @@ import {
   where,
   getDoc
 } from "firebase/firestore";
-// Removed firebase/auth imports as we are moving to custom DB auth
 import { AppView, MessageTemplate, LogEntry, ApiNode, UserProfile } from './types';
 import { INITIAL_API_NODES } from './apiNodes';
 import Sender from './components/Sender';
@@ -25,7 +24,8 @@ import Profile from './components/Profile';
 import Admin from './components/Admin';
 import Disclaimer from './components/Disclaimer';
 import Landing from './components/Landing';
-import Auth from './components/Auth';
+import Login from './components/Login';       // New Import
+import Register from './components/Register'; // New Import
 import { db, isFirebaseConfigured, collections } from './firebase';
 
 // Mock Data
@@ -48,37 +48,34 @@ export default function App() {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
   const [showDisclaimer, setShowDisclaimer] = useState(true);
   
-  // Auth State - Initialize from localStorage
+  // Auth State - Initialize from localStorage for "Remember Me"
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => loadFromStorage('netstrike_active_user', null));
-  const [authLoading, setAuthLoading] = useState(false); 
+  const [rememberSession, setRememberSession] = useState(true); // Default to true
 
   // App State
   const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
   const [disabledNodes, setDisabledNodes] = useState<string[]>(() => loadFromStorage('disabled_nodes', []));
-  
-  // CHANGED: Initialize empty. Will load from DB if connected.
   const [apiNodes, setApiNodes] = useState<ApiNode[]>([]);
-  
   const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
   
   const isDbConnected = isFirebaseConfigured() && !!db;
 
-  // Persist User Session
+  // Persist User Session (Remember Me Logic)
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser && rememberSession) {
       localStorage.setItem('netstrike_active_user', JSON.stringify(currentUser));
-      // Redirect to Home if on Landing/Login/Register
+      // Redirect to HOME if on Auth pages
       if ([AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
         setCurrentView(AppView.HOME);
       }
-    } else {
+    } else if (!currentUser) {
       localStorage.removeItem('netstrike_active_user');
-      // If not logged in, force Landing or Auth pages
+      // Force Auth views if logged out
       if (![AppView.LANDING, AppView.LOGIN, AppView.REGISTER].includes(currentView)) {
         setCurrentView(AppView.LANDING);
       }
     }
-  }, [currentUser]); 
+  }, [currentUser, rememberSession]); // Trigger only when user or preference changes
 
   useEffect(() => {
     const accepted = localStorage.getItem('disclaimer_accepted');
@@ -127,7 +124,6 @@ export default function App() {
               ...doc.data()
           } as ApiNode));
           
-          // Sort by name for consistency
           loadedNodes.sort((a, b) => a.name.localeCompare(b.name));
           setApiNodes(loadedNodes);
       }, (err) => console.error("API Nodes sync error:", err));
@@ -138,12 +134,10 @@ export default function App() {
         unsubNodes();
       };
     } else {
-       // OFFLINE / GUEST MODE FALLBACK
        if (!currentUser) {
            setLogs([]);
-           setApiNodes([]); // Reset when logged out
+           setApiNodes([]); 
        } else {
-           // Guest mode: Use Local Storage or Defaults
            const storedNodes = localStorage.getItem('netstrike_nodes_v5');
            if (storedNodes) {
                setApiNodes(JSON.parse(storedNodes));
@@ -156,8 +150,6 @@ export default function App() {
 
   // Sync Local Settings (Backup)
   useEffect(() => { localStorage.setItem('disabled_nodes', JSON.stringify(disabledNodes)); }, [disabledNodes]);
-  // We only sync to local storage for backup if user is guest/offline mainly, or to cache.
-  // But if connected, DB is truth.
   useEffect(() => { 
       if (!isDbConnected || (currentUser && currentUser.uid.startsWith('guest_'))) {
         localStorage.setItem('netstrike_nodes_v5', JSON.stringify(apiNodes)); 
@@ -221,11 +213,9 @@ export default function App() {
     );
   };
 
-  // UPDATED CRUD HANDLERS FOR DB
   const handleUpdateNode = async (updatedNode: ApiNode) => {
     if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
-             // Overwrite node in DB
              await setDoc(doc(db, "api_nodes", updatedNode.id), updatedNode);
         } catch(e) { console.error("DB Update Failed", e); }
     } else {
@@ -236,7 +226,6 @@ export default function App() {
   const handleAddNode = async (newNode: ApiNode) => {
     if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
-             // Use ID from object if present, else auto-gen
              await setDoc(doc(db, "api_nodes", newNode.id), newNode);
         } catch(e) { console.error("DB Add Failed", e); }
     } else {
@@ -294,35 +283,26 @@ export default function App() {
       role: 'user',
       createdAt: new Date()
     };
+    setRememberSession(false); // Guest is typically temporary
     setCurrentUser(guestUser);
     setCurrentView(AppView.HOME);
   };
 
-  const handleAuthSuccess = (user: UserProfile) => {
+  const handleAuthSuccess = (user: UserProfile, remember: boolean) => {
+    setRememberSession(remember);
     setCurrentUser(user);
+    // View change is handled by useEffect when currentUser updates
   };
 
   const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
 
-  if (authLoading) {
-     return (
-        <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
-            <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
-        </div>
-     );
-  }
-
   // Unauthenticated Views
   if (!currentUser) {
-      if (currentView === AppView.LOGIN || currentView === AppView.REGISTER) {
-          return (
-            <Auth 
-                view={currentView} 
-                onNavigate={setCurrentView} 
-                onLoginSuccess={handleAuthSuccess} 
-                onGuestLogin={handleGuestLogin}
-            />
-          );
+      if (currentView === AppView.LOGIN) {
+          return <Login onNavigate={setCurrentView} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />;
+      }
+      if (currentView === AppView.REGISTER) {
+          return <Register onNavigate={setCurrentView} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />;
       }
       return <Landing onNavigate={setCurrentView} />;
   }
@@ -444,7 +424,7 @@ export default function App() {
       {currentView !== AppView.ADMIN && (
         <nav className="h-16 border-t border-zinc-800 bg-[#09090b]/90 backdrop-blur-xl shrink-0 z-20 pb-safe">
           <div className="flex h-full max-w-2xl mx-auto">
-            <NavItem view={AppView.SEND} icon={Zap} label="Attack" />
+            <NavItem view={AppView.SEND} icon={Zap} label="Bomber" />
             <NavItem view={AppView.HOME} icon={HomeIcon} label="Status" />
             <NavItem view={AppView.PROTECTOR} icon={ShieldCheck} label="Protect" />
             <NavItem view={AppView.TEMPLATES} icon={LayoutList} label="Logs" />
