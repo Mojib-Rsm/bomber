@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActiveSession } from '../types';
-import { CheckCircle2, XCircle, Clock, StopCircle, CloudLightning, MonitorSmartphone, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, StopCircle, CloudLightning, AlertTriangle } from 'lucide-react';
 
 interface HistoryLogProps {
   sessions: ActiveSession[];
@@ -59,8 +59,8 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ sessions, onStopSession }) => {
                         <div>
                             <h3 className="font-mono-code text-lg font-bold text-white leading-none">{session.target}</h3>
                             <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[10px] text-zinc-500 uppercase font-bold">{session.mode === 'cloud' ? 'Cloud Server' : 'Browser Local'}</span>
-                                {session.mode === 'cloud' ? <CloudLightning className="w-3 h-3 text-blue-500" /> : <MonitorSmartphone className="w-3 h-3 text-zinc-600" />}
+                                <span className="text-[10px] text-zinc-500 uppercase font-bold">Cloud Server</span>
+                                <CloudLightning className="w-3 h-3 text-emerald-500" />
                             </div>
                         </div>
                     </div>
