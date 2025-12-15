@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageTemplate, LogEntry, ApiNode, UserProfile } from '../types';
-import { Zap, StopCircle, Terminal, Gauge, Server, CloudLightning, Wifi, WifiOff, MonitorSmartphone } from 'lucide-react';
+import { Zap, StopCircle, Terminal, Server, CloudLightning, Wifi, WifiOff, MonitorSmartphone } from 'lucide-react';
 import { addDoc, doc, updateDoc, onSnapshot } from "firebase/firestore"; 
 import { db, collections } from '../firebase';
 import { executeAttackNode } from '../services/attackEngine';
@@ -238,6 +238,19 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     }
   };
 
+  // Helper variables for JSX cleanliness
+  const buttonClass = `w-full py-4 rounded-xl font-bold uppercase tracking-wider text-sm shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 ${
+    isRunning 
+    ? 'bg-zinc-800 hover:bg-zinc-700 text-red-500 border border-red-900/50' 
+    : 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20'
+  }`;
+
+  const buttonContent = isRunning ? (
+    <React.Fragment><StopCircle className="w-5 h-5" /> {isCloudMode ? 'Cancel Request' : 'Stop Attack'}</React.Fragment>
+  ) : (
+    <React.Fragment><Zap className="w-5 h-5 fill-current" /> {isCloudMode ? 'Queue Attack' : 'Start Attack'}</React.Fragment>
+  );
+
   return (
     <div className="p-5 pb-10 space-y-6 animate-fade-in">
       
@@ -341,17 +354,9 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
         {/* Action Button */}
         <button
           onClick={isRunning ? () => handleStop() : handleStart}
-          className={`w-full py-4 rounded-xl font-bold uppercase tracking-wider text-sm shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 ${
-            isRunning 
-            ? 'bg-zinc-800 hover:bg-zinc-700 text-red-500 border border-red-900/50' 
-            : 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20'
-          }`}
+          className={buttonClass}
         >
-          {isRunning ? (
-            <><StopCircle className="w-5 h-5" /> {isCloudMode ? 'Cancel Request' : 'Stop Attack'}</>
-          ) : (
-            <><Zap className="w-5 h-5 fill-current" /> {isCloudMode ? 'Queue Attack' : 'Start Attack'}</>
-          )}
+          {buttonContent}
         </button>
       </div>
 
