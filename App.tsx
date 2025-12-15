@@ -50,12 +50,15 @@ export default function App() {
   
   // Auth State - Initialize from localStorage
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => loadFromStorage('netstrike_active_user', null));
-  const [authLoading, setAuthLoading] = useState(false); // No longer waiting for Firebase Auth
+  const [authLoading, setAuthLoading] = useState(false); 
 
   // App State
   const [logs, setLogs] = useState<LogEntry[]>(() => loadFromStorage('logs', []));
   const [disabledNodes, setDisabledNodes] = useState<string[]>(() => loadFromStorage('disabled_nodes', []));
-  const [apiNodes, setApiNodes] = useState<ApiNode[]>(() => loadFromStorage('netstrike_nodes_v5', INITIAL_API_NODES));
+  
+  // CHANGED: Initialize empty. Will load from DB if connected.
+  const [apiNodes, setApiNodes] = useState<ApiNode[]>([]);
+  
   const [protectedNumbers, setProtectedNumbers] = useState<string[]>(() => loadFromStorage('protected_numbers', []));
   
   const isDbConnected = isFirebaseConfigured() && !!db;
@@ -75,25 +78,23 @@ export default function App() {
         setCurrentView(AppView.LANDING);
       }
     }
-  }, [currentUser]); // Trigger only when user changes
+  }, [currentUser]); 
 
   useEffect(() => {
     const accepted = localStorage.getItem('disclaimer_accepted');
     if (accepted === 'true') setShowDisclaimer(false);
   }, []);
 
-  // FIRESTORE SYNC (LOGS & PROTECTED)
+  // FIRESTORE SYNC (LOGS, PROTECTED, API NODES)
   useEffect(() => {
     if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
       console.log("Subscribing to Firestore Data...");
 
-      // 1. Logs Sync (Role Based)
-      // Admin sees ALL logs. User sees only THEIR logs.
+      // 1. Logs Sync
       let qLogs;
       if (currentUser.role === 'admin') {
          qLogs = query(collections.logs(db), orderBy("timestamp", "desc"));
       } else {
-         // Note: Requires Firestore Index for 'userId' + 'timestamp'
          qLogs = query(collections.logs(db), where("userId", "==", currentUser.uid), orderBy("timestamp", "desc"));
       }
 
@@ -108,11 +109,7 @@ export default function App() {
         });
         setLogs(firebaseLogs);
       }, (err) => {
-          // Fallback if index missing or permission error
           console.error("Logs sync error:", err);
-          if (err.message.includes("index")) {
-             console.warn("Please create Firestore Index: logs > userId Asc + timestamp Desc");
-          }
       });
 
       // 2. Sync Protected Numbers
@@ -122,19 +119,50 @@ export default function App() {
          setProtectedNumbers(nums);
       }, (err) => console.error("Protector sync error:", err));
 
+      // 3. Sync API Nodes (DB Source of Truth)
+      const qNodes = collection(db, "api_nodes");
+      const unsubNodes = onSnapshot(qNodes, (snapshot) => {
+          const loadedNodes = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+          } as ApiNode));
+          
+          // Sort by name for consistency
+          loadedNodes.sort((a, b) => a.name.localeCompare(b.name));
+          setApiNodes(loadedNodes);
+      }, (err) => console.error("API Nodes sync error:", err));
+
       return () => {
         unsubLogs();
         unsubProt();
+        unsubNodes();
       };
-    } else if (!currentUser) {
-       setLogs([]); // Clear logs on logout
+    } else {
+       // OFFLINE / GUEST MODE FALLBACK
+       if (!currentUser) {
+           setLogs([]);
+           setApiNodes([]); // Reset when logged out
+       } else {
+           // Guest mode: Use Local Storage or Defaults
+           const storedNodes = localStorage.getItem('netstrike_nodes_v5');
+           if (storedNodes) {
+               setApiNodes(JSON.parse(storedNodes));
+           } else {
+               setApiNodes(INITIAL_API_NODES);
+           }
+       }
     }
-    // Guest mode uses local state (logs var), so no sync needed
   }, [isDbConnected, currentUser]);
 
   // Sync Local Settings (Backup)
   useEffect(() => { localStorage.setItem('disabled_nodes', JSON.stringify(disabledNodes)); }, [disabledNodes]);
-  useEffect(() => { localStorage.setItem('netstrike_nodes_v5', JSON.stringify(apiNodes)); }, [apiNodes]);
+  // We only sync to local storage for backup if user is guest/offline mainly, or to cache.
+  // But if connected, DB is truth.
+  useEffect(() => { 
+      if (!isDbConnected || (currentUser && currentUser.uid.startsWith('guest_'))) {
+        localStorage.setItem('netstrike_nodes_v5', JSON.stringify(apiNodes)); 
+      }
+  }, [apiNodes, isDbConnected, currentUser]);
   
   const handleAcceptDisclaimer = () => {
     localStorage.setItem('disclaimer_accepted', 'true');
@@ -142,7 +170,6 @@ export default function App() {
   };
   
   const handleSendLog = async (log: LogEntry) => {
-    // Add User Context to Log
     const logWithUser: LogEntry = {
         ...log,
         userId: currentUser?.uid,
@@ -167,8 +194,6 @@ export default function App() {
   const handleClearLogs = async () => {
     if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
         try {
-            // Delete only own logs if not admin, or all if admin (logic simplified to own/viewed)
-            // Ideally batch delete by query
             const q = currentUser.role === 'admin' 
                 ? query(collections.logs(db)) 
                 : query(collections.logs(db), where("userId", "==", currentUser.uid));
@@ -196,17 +221,37 @@ export default function App() {
     );
   };
 
+  // UPDATED CRUD HANDLERS FOR DB
   const handleUpdateNode = async (updatedNode: ApiNode) => {
-    setApiNodes(prev => prev.map(node => node.id === updatedNode.id ? updatedNode : node));
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        try {
+             // Overwrite node in DB
+             await setDoc(doc(db, "api_nodes", updatedNode.id), updatedNode);
+        } catch(e) { console.error("DB Update Failed", e); }
+    } else {
+        setApiNodes(prev => prev.map(node => node.id === updatedNode.id ? updatedNode : node));
+    }
   };
 
   const handleAddNode = async (newNode: ApiNode) => {
-    const node = { ...newNode, id: Date.now().toString() };
-    setApiNodes(prev => [...prev, node]);
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        try {
+             // Use ID from object if present, else auto-gen
+             await setDoc(doc(db, "api_nodes", newNode.id), newNode);
+        } catch(e) { console.error("DB Add Failed", e); }
+    } else {
+        setApiNodes(prev => [...prev, newNode]);
+    }
   };
 
   const handleDeleteNode = async (id: string) => {
-    setApiNodes(prev => prev.filter(node => node.id !== id));
+    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+        try {
+             await deleteDoc(doc(db, "api_nodes", id));
+        } catch(e) { console.error("DB Delete Failed", e); }
+    } else {
+        setApiNodes(prev => prev.filter(node => node.id !== id));
+    }
   };
 
   const handleAddProtectedNumber = async (phone: string) => {
@@ -236,7 +281,6 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-     // No firebase signOut needed
      setCurrentUser(null);
      localStorage.removeItem('netstrike_active_user');
      setCurrentView(AppView.LANDING);
@@ -254,10 +298,8 @@ export default function App() {
     setCurrentView(AppView.HOME);
   };
 
-  // Handler for custom database auth success
   const handleAuthSuccess = (user: UserProfile) => {
     setCurrentUser(user);
-    // View change handled by useEffect
   };
 
   const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
