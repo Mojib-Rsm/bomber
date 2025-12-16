@@ -53,13 +53,20 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
       if (userData.phone) {
           // Send via SMS
           setMethod('phone');
-          const sent = await sendSmsOtp(userData.phone, code);
-          setSuccessMsg(`OTP sent to registered phone ending in ${userData.phone.slice(-4)}`);
+          const success = await sendSmsOtp(userData.phone, code);
+          if (success) {
+            setSuccessMsg(`OTP sent to registered phone ending in ${userData.phone.slice(-4)}`);
+          } else {
+             // Fallback
+             alert(`[DEV MODE] SMS API Failed. Your OTP is: ${code}`);
+             setSuccessMsg(`[DEV MODE] OTP shown in alert.`);
+          }
       } else {
           // Simulate Email Sending (Client-side restriction)
           setMethod('email');
-          console.log(`[EMAIL SIMULATION] Sending OTP ${code} via SMTP (Zoho)...`);
-          setSuccessMsg(`OTP sent to ${userData.email} (Check Console/Spam)`);
+          console.log(`[EMAIL SIMULATION] Sending OTP ${code} via SMTP...`);
+          alert(`[EMAIL SIMULATION] OTP is: ${code}`);
+          setSuccessMsg(`OTP sent to ${userData.email} (Check Console/Alert)`);
       }
       
       setStep('verify');

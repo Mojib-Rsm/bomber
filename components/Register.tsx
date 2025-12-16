@@ -35,8 +35,6 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
       if (!emailSnap.empty) throw new Error("Email already registered. Please login.");
 
       // 2. Check if phone exists
-      // Note: This requires a composite index or separate query if you want strict phone uniqueness
-      // For now, we'll check it client-side if the collection isn't huge, or separate query
       const phoneQuery = query(usersRef, where("phone", "==", formData.phone));
       const phoneSnap = await getDocs(phoneQuery);
       if (!phoneSnap.empty) throw new Error("Phone number already registered.");
@@ -45,9 +43,14 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
       const code = generateOtp();
       setGeneratedOtp(code);
       
-      const sent = await sendSmsOtp(formData.phone, code);
+      const success = await sendSmsOtp(formData.phone, code);
       
       console.log(`DEBUG MODE: OTP is ${code}`); 
+      
+      if (!success) {
+          // Fallback for demo/testing or if API fails
+          alert(`[DEV MODE] SMS API Failed. Your OTP is: ${code}`);
+      }
       
       setStep('otp');
 

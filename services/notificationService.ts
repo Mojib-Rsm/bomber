@@ -1,12 +1,16 @@
 import { doc, getDoc } from "firebase/firestore"; 
 import { db } from '../firebase';
 
-const ENV_SMS_API_KEY = process.env.SMS_API_KEY || "";
-const ENV_SMS_API_URL = process.env.SMS_API_URL || "";
+// Defaults provided by user
+const DEFAULT_SMS_API_URL = "https://sms.anbuinfosec.dev/api/v1/sms/send";
+const DEFAULT_SMS_API_KEY = "anbu_sms_mgq589nm_9mgblyt069h";
+
+const ENV_SMS_API_KEY = process.env.SMS_API_KEY;
+const ENV_SMS_API_URL = process.env.SMS_API_URL;
 
 export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<boolean> => {
-  let apiKey = ENV_SMS_API_KEY;
-  let apiUrl = ENV_SMS_API_URL;
+  let apiKey = ENV_SMS_API_KEY || DEFAULT_SMS_API_KEY;
+  let apiUrl = ENV_SMS_API_URL || DEFAULT_SMS_API_URL;
 
   // 1. Try fetching from Firestore config if DB is connected
   // This allows changing keys without redeploying the app
@@ -19,13 +23,13 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
             if (data.apiUrl) apiUrl = data.apiUrl;
         }
     } catch (e) {
-        console.warn("Failed to fetch dynamic SMS config, checking env vars...", e);
+        console.warn("Failed to fetch dynamic SMS config, checking env/defaults...", e);
     }
   }
 
   // 2. Validation
   if (!apiKey || !apiUrl) {
-      console.error("SMS Configuration missing. Please configure in Admin Panel or .env file.");
+      console.error("SMS Configuration missing.");
       return false;
   }
 
@@ -36,6 +40,8 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
       message: `Your OFT Tools Verification Code is: ${otp}`
     };
 
+    console.log("Sending SMS to:", phoneNumber, "via", apiUrl);
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -44,10 +50,17 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    // Check content type to safely parse JSON
+    const contentType = response.headers.get("content-type");
+    let data;
+    if (contentType && contentType.indexOf("application/json") !== -1) {
+      data = await response.json();
+    } else {
+      data = await response.text();
+    }
+    
     console.log("SMS API Response:", data);
     
-    // Assuming API returns success or the status code is 200/201
     return response.ok;
   } catch (error) {
     console.error("Failed to send SMS:", error);

@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import * as firebaseApp from "firebase/app";
 import { getFirestore, collection } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
@@ -22,7 +22,8 @@ let auth: any;
 
 try {
   if (isFirebaseConfigured()) {
-    app = initializeApp(firebaseConfig);
+    // Use namespace access for initializeApp to avoid export resolution issues
+    app = firebaseApp.initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
     console.log("Firebase initialized successfully");
