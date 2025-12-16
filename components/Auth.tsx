@@ -8,10 +8,9 @@ interface AuthProps {
   view: AppView; // LOGIN or REGISTER
   onNavigate: (view: AppView) => void;
   onLoginSuccess: (user: UserProfile) => void;
-  onGuestLogin: () => void;
 }
 
-const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLogin }) => {
+const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
@@ -30,7 +29,7 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
 
     try {
       if (!db) {
-        throw new Error("Database not connected. Please use Guest Mode.");
+        throw new Error("Database not connected.");
       }
 
       if (view === AppView.REGISTER) {
@@ -205,15 +204,6 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
                        <ShieldAlert className="w-3 h-3" />
                        <span>{error}</span>
                    </div>
-                   {(error.includes("Console") || error.includes("connected")) && (
-                       <button 
-                           type="button" 
-                           onClick={onGuestLogin}
-                           className="mt-1 text-xs underline hover:text-white"
-                       >
-                           Switch to Guest Mode?
-                       </button>
-                   )}
                 </div>
              )}
 
@@ -230,19 +220,6 @@ const Auth: React.FC<AuthProps> = ({ view, onNavigate, onLoginSuccess, onGuestLo
                 )}
              </button>
           </form>
-
-          {/* Guest Mode Fallback */}
-          <div className="mt-4 pt-4 border-t border-zinc-800/50">
-             <button 
-               onClick={onGuestLogin}
-               className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all text-xs flex items-center justify-center gap-2 border border-zinc-700 hover:border-zinc-600"
-             >
-                Continue as Guest (Local Mode)
-             </button>
-             <p className="text-[10px] text-zinc-600 text-center mt-2">
-                *Guest data is stored locally. Use this if DB is having issues.
-             </p>
-          </div>
 
           <div className="mt-6 text-center">
              <p className="text-xs text-zinc-500">

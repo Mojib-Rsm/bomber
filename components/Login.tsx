@@ -7,10 +7,9 @@ import { db, isFirebaseConfigured } from '../firebase';
 interface LoginProps {
   onNavigate: (view: AppView) => void;
   onLoginSuccess: (user: UserProfile, remember: boolean) => void;
-  onGuestLogin: () => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess, onGuestLogin }) => {
+const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [rememberMe, setRememberMe] = useState(true);
@@ -24,7 +23,7 @@ const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess, onGuestLogin 
     setLoading(true);
 
     try {
-      if (!db) throw new Error("Database not connected. Please use Guest Mode.");
+      if (!db) throw new Error("Database not connected.");
 
       // DB LOGIN LOGIC
       const usersRef = collection(db, "users");
@@ -138,9 +137,6 @@ const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess, onGuestLogin 
              {error && (
                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-500 font-medium text-center animate-pulse flex flex-col items-center justify-center gap-1">
                    <div className="flex items-center gap-2"><ShieldAlert className="w-3 h-3" /><span>{error}</span></div>
-                   {(error.includes("Console") || error.includes("connected")) && (
-                       <button type="button" onClick={onGuestLogin} className="mt-1 text-xs underline hover:text-white">Switch to Guest Mode?</button>
-                   )}
                 </div>
              )}
 
@@ -152,10 +148,6 @@ const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess, onGuestLogin 
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Access Console <ArrowRight className="w-4 h-4" /></>}
              </button>
           </form>
-
-          <div className="mt-4 pt-4 border-t border-zinc-800/50">
-             <button onClick={onGuestLogin} className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all text-xs border border-zinc-700">Continue as Guest</button>
-          </div>
 
           <div className="mt-6 text-center">
              <p className="text-xs text-zinc-500">

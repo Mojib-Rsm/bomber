@@ -59,7 +59,7 @@ const Sender: React.FC<SenderProps> = ({ templates, onSend, protectedNumbers, ac
     }
 
     // Strict Cloud Requirement
-    if (!db || !currentUser || currentUser.uid.startsWith('guest_')) {
+    if (!db || !currentUser) {
         addLog(">> ACCESS DENIED: LOGIN REQUIRED FOR SERVER REQUESTS.");
         return;
     }

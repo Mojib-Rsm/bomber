@@ -8,10 +8,9 @@ import { sendSmsOtp, generateOtp } from '../services/notificationService';
 interface RegisterProps {
   onNavigate: (view: AppView) => void;
   onLoginSuccess: (user: UserProfile, remember: boolean) => void;
-  onGuestLogin: () => void;
 }
 
-const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess, onGuestLogin }) => {
+const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'details' | 'otp'>('details');
   const [formData, setFormData] = useState({ username: '', email: '', password: '', phone: '' });
@@ -27,7 +26,7 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess, onGuest
     setLoading(true);
 
     try {
-      if (!db) throw new Error("Database not connected. Please use Guest Mode.");
+      if (!db) throw new Error("Database not connected.");
 
       // 1. Check if email exists
       const usersRef = collection(db, "users");
@@ -47,12 +46,9 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess, onGuest
       setGeneratedOtp(code);
       
       const sent = await sendSmsOtp(formData.phone, code);
-      // NOTE: If CORS fails in browser, we might simulate it for demo purposes if 'sent' is false
-      // In production, this would be a server-side call.
       
-      console.log(`DEBUG MODE: OTP is ${code}`); // Remove in production
+      console.log(`DEBUG MODE: OTP is ${code}`); 
       
-      // We proceed to OTP step regardless of API success to allow manual entry if API fails silently or for demo
       setStep('otp');
 
     } catch (err: any) {
@@ -240,10 +236,6 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess, onGuest
                 </button>
             </form>
           )}
-
-          <div className="mt-4 pt-4 border-t border-zinc-800/50">
-             <button onClick={onGuestLogin} className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all text-xs border border-zinc-700">Continue as Guest</button>
-          </div>
 
           <div className="mt-6 text-center">
              <p className="text-xs text-zinc-500">

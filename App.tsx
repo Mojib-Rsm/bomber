@@ -191,7 +191,7 @@ function AppContent() {
 
   // Sync Logic
   useEffect(() => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
       const qLogs = currentUser.role === 'admin' 
         ? query(collections.logs(db), orderBy("timestamp", "desc"))
         : query(collections.logs(db), where("userId", "==", currentUser.uid), orderBy("timestamp", "desc"));
@@ -206,7 +206,6 @@ function AppContent() {
       });
 
       // Session/History Sync
-      // Removed orderBy to avoid index requirement issues on fresh Firestore instances
       const qSessions = query(
           collections.sessions(db), 
           where("userId", "==", currentUser.uid)
@@ -260,7 +259,7 @@ function AppContent() {
         userId: currentUser?.uid,
         username: currentUser?.username || 'Unknown'
     };
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
         try { 
             await addDoc(collections.logs(db), { ...logWithUser, timestamp: new Date() }); 
         } catch (error) { console.error(error); }
@@ -279,7 +278,7 @@ function AppContent() {
   };
 
   const handleClearLogs = async () => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
         const q = currentUser.role === 'admin' ? query(collections.logs(db)) : query(collections.logs(db), where("userId", "==", currentUser.uid));
         const snapshot = await getDocs(q);
         const batch = writeBatch(db);
@@ -300,7 +299,7 @@ function AppContent() {
   };
 
   const handleUpdateNode = async (updatedNode: ApiNode) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
         await setDoc(doc(db, "api_nodes", updatedNode.id), updatedNode);
     } else {
         setApiNodes(prev => prev.map(node => node.id === updatedNode.id ? updatedNode : node));
@@ -308,7 +307,7 @@ function AppContent() {
   };
 
   const handleAddNode = async (newNode: ApiNode) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
         await setDoc(doc(db, "api_nodes", newNode.id), newNode);
     } else {
         setApiNodes(prev => [...prev, newNode]);
@@ -316,7 +315,7 @@ function AppContent() {
   };
 
   const handleDeleteNode = async (id: string) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
         await deleteDoc(doc(db, "api_nodes", id));
     } else {
         setApiNodes(prev => prev.filter(node => node.id !== id));
@@ -324,7 +323,7 @@ function AppContent() {
   };
 
   const handleAddProtectedNumber = async (phone: string) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
         await setDoc(doc(db, "protected_numbers", phone), { phone, addedAt: new Date(), addedBy: currentUser?.username || 'System' });
     } else {
         if (!protectedNumbers.includes(phone)) {
@@ -336,7 +335,7 @@ function AppContent() {
   };
 
   const handleRemoveProtectedNumber = async (phone: string) => {
-    if (isDbConnected && db && currentUser && !currentUser.uid.startsWith('guest_')) {
+    if (isDbConnected && db && currentUser) {
         await deleteDoc(doc(db, "protected_numbers", phone));
     } else {
         const next = protectedNumbers.filter(num => num !== phone);
@@ -351,23 +350,15 @@ function AppContent() {
      navigate('/');
   };
 
-  const handleGuestLogin = () => {
-    const guestUser: UserProfile = {
-      uid: 'guest_' + Date.now(),
-      email: 'guest@netstrike.local',
-      username: 'Guest_Operative',
-      role: 'user',
-      createdAt: new Date()
-    };
-    setRememberSession(false);
-    setCurrentUser(guestUser);
-    navigate('/home');
-  };
-
   const handleAuthSuccess = (user: UserProfile, remember: boolean) => {
     setRememberSession(remember);
     setCurrentUser(user);
     navigate('/home');
+  };
+
+  const handleProfileUpdate = (updatedUser: UserProfile) => {
+    setCurrentUser(updatedUser);
+    localStorage.setItem('netstrike_active_user', JSON.stringify(updatedUser));
   };
 
   const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
@@ -380,8 +371,8 @@ function AppContent() {
         {/* Public Routes */}
         <Route element={<AuthLayout />}>
            <Route path="/" element={currentUser ? <Navigate to="/home" /> : <Landing onNavigate={handleLegacyNavigate} />} />
-           <Route path="/login" element={currentUser ? <Navigate to="/home" /> : <Login onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />} />
-           <Route path="/register" element={currentUser ? <Navigate to="/home" /> : <Register onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} onGuestLogin={handleGuestLogin} />} />
+           <Route path="/login" element={currentUser ? <Navigate to="/home" /> : <Login onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} />} />
+           <Route path="/register" element={currentUser ? <Navigate to="/home" /> : <Register onNavigate={handleLegacyNavigate} onLoginSuccess={handleAuthSuccess} />} />
            <Route path="/forgot-password" element={<ForgotPassword onNavigate={handleLegacyNavigate} />} />
         </Route>
 
@@ -391,7 +382,7 @@ function AppContent() {
            <Route path="/bomber" element={<Sender templates={INITIAL_TEMPLATES} onSend={handleSendLog} protectedNumbers={protectedNumbers} activeNodes={activeNodes} currentUser={currentUser} />} />
            <Route path="/protector" element={<Protector protectedNumbers={protectedNumbers} onAdd={handleAddProtectedNumber} onRemove={handleRemoveProtectedNumber} />} />
            <Route path="/logs" element={<HistoryLog sessions={userSessions} onStopSession={handleStopSession} />} />
-           <Route path="/profile" element={<Profile logs={logs} contacts={[]} currentUser={currentUser} onClearLogs={handleClearLogs} onClearContacts={() => {}} onNavigate={handleLegacyNavigate} />} />
+           <Route path="/profile" element={<Profile logs={logs} contacts={[]} currentUser={currentUser} onClearLogs={handleClearLogs} onClearContacts={() => {}} onNavigate={handleLegacyNavigate} onUpdateProfile={handleProfileUpdate} />} />
            <Route path="/admin" element={<Admin apiNodes={apiNodes} disabledNodes={disabledNodes} currentUser={currentUser} logs={logs} toggleNode={handleToggleNode} onUpdateNode={handleUpdateNode} onAddNode={handleAddNode} onDeleteNode={handleDeleteNode} onLogout={() => navigate('/profile')} />} />
         </Route>
         
