@@ -1,44 +1,45 @@
 import { doc, getDoc } from "firebase/firestore"; 
 import { db } from '../firebase';
 
-// Configuration
-const DEFAULT_SMS_API_URL = "https://sms.anbuinfosec.dev/api/v1/sms/send";
-const DEFAULT_SMS_API_KEY = "anbu_sms_mgq589nm_9mgblyt069h";
-// Using corsproxy.io to route traffic. This solves CORS errors and masks the direct destination in the browser network tab (Host column).
+// PROXY GATEWAY
+// We use this to bypass CORS. 
+// Note: To completely hide the destination URL from the Network tab, a backend server (Cloud Function) is required.
+// However, by loading from DB, we ensure the API URL is NOT present in the client-side JavaScript bundle.
 const PROXY_GATEWAY = "https://corsproxy.io/?";
 
-const ENV_SMS_API_KEY = process.env.SMS_API_KEY;
-const ENV_SMS_API_URL = process.env.SMS_API_URL;
-
 export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<boolean> => {
-  let apiKey = ENV_SMS_API_KEY || DEFAULT_SMS_API_KEY;
-  let apiUrl = ENV_SMS_API_URL || DEFAULT_SMS_API_URL;
-
-  // 1. Dynamic Config Fetch
-  if (db) {
-    try {
-        const configSnap = await getDoc(doc(db, "system_config", "sms"));
-        if (configSnap.exists()) {
-            const data = configSnap.data();
-            if (data.apiKey) apiKey = data.apiKey;
-            if (data.apiUrl) apiUrl = data.apiUrl;
-        }
-    } catch (e) {
-        // Silent fail on config fetch, fall back to defaults
-    }
+  // Strict check: Database must be connected
+  if (!db) {
+      console.error("Database connection required for secure SMS dispatch.");
+      return false;
   }
 
-  if (!apiKey || !apiUrl) return false;
-
   try {
+    // 1. Fetch Secure Config from Database (system_config/sms)
+    // This ensures the API URL and Key are never hardcoded in the source files.
+    const configSnap = await getDoc(doc(db, "system_config", "sms"));
+    
+    if (!configSnap.exists()) {
+        console.error("Secure SMS Configuration missing in database.");
+        return false;
+    }
+
+    const data = configSnap.data();
+    const apiKey = data.apiKey;
+    const apiUrl = data.apiUrl;
+
+    if (!apiKey || !apiUrl) {
+        console.error("Incomplete SMS configuration in database.");
+        return false;
+    }
+
     const payload = {
       apiKey: apiKey,
       recipient: phoneNumber,
       message: `Your OFT Tools Verification Code is: ${otp}`
     };
 
-    // Construct Proxied URL
-    // The browser will connect to corsproxy.io, not the SMS API directly.
+    // 2. Construct Proxied Request
     const targetUrl = encodeURIComponent(apiUrl);
     const finalUrl = `${PROXY_GATEWAY}${targetUrl}`;
 
@@ -52,7 +53,7 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
 
     return response.ok;
   } catch (error) {
-    console.error("SMS Dispatch Error:", error);
+    console.error("Secure SMS Dispatch Error:", error);
     return false;
   }
 };
@@ -62,10 +63,16 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
 
   try {
     const configSnap = await getDoc(doc(db, "system_config", "email"));
-    if (!configSnap.exists()) return false;
+    if (!configSnap.exists()) {
+        console.error("Secure Email Config missing.");
+        return false;
+    }
 
     const config = configSnap.data();
-    if (!config.apiUrl || !config.smtpHost || !config.smtpUser || !config.smtpPass) return false;
+    if (!config.apiUrl || !config.smtpHost || !config.smtpUser || !config.smtpPass) {
+        console.error("Incomplete Email configuration.");
+        return false;
+    }
 
     const payload = {
        host: config.smtpHost,
@@ -85,7 +92,7 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
               </div>`
     };
 
-    // Proxy the Email API request as well
+    // Proxy the Email API request
     const targetUrl = encodeURIComponent(config.apiUrl);
     const finalUrl = `${PROXY_GATEWAY}${targetUrl}`;
 

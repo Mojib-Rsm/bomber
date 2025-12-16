@@ -25,9 +25,9 @@ export const executeAttackNode = async (node: ApiNode, phone: string, signal: Ab
     const isGet = node.method === 'GET';
 
     try {
-        // ALWAYS use proxy for client-side attacks to:
-        // 1. Bypass CORS restrictions on the target API.
-        // 2. Hide the direct target URL in the browser's "Domain" column (it will show corsproxy.io).
+        // We use the proxy to ensure the browser allows the request (CORS) 
+        // and to obscure the destination in the "Host" column of network tools, 
+        // though the full URL is still visible in the query string.
         const encodedTarget = encodeURIComponent(url);
         const finalUrl = `${PROXY_GATEWAY}${encodedTarget}`;
 
@@ -40,7 +40,7 @@ export const executeAttackNode = async (node: ApiNode, phone: string, signal: Ab
             referrerPolicy: 'no-referrer'
         });
         
-        // Handle opaque responses (common with some proxies or no-cors modes, though corsproxy returns standard cors)
+        // Handle opaque responses (common with some proxies or no-cors modes)
         if (response.type === 'opaque') {
             return { ok: true, status: 0 };
         }
