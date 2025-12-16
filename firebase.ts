@@ -1,5 +1,4 @@
-// Fix: Use namespace import to avoid 'no exported member' error
-import * as firebaseApp from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getFirestore, collection } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
@@ -23,8 +22,7 @@ let auth: any;
 
 try {
   if (isFirebaseConfigured()) {
-    // Fix: Access initializeApp from the namespace object
-    app = firebaseApp.initializeApp(firebaseConfig);
+    app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
     console.log("Firebase initialized successfully");

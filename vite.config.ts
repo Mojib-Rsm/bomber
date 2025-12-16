@@ -23,7 +23,8 @@ export default defineConfig(({ mode }) => {
       'process.env.SMS_API_URL': JSON.stringify(env.SMS_API_URL || process.env.SMS_API_URL),
       'process.env.SMTP_USER': JSON.stringify(env.SMTP_USER || process.env.SMTP_USER),
       'process.env.SMTP_PASS': JSON.stringify(env.SMTP_PASS || process.env.SMTP_PASS),
-      'process.env.SMTP_HOST': JSON.stringify(env.SMTP_HOST || process.env.SMTP_HOST)
+      'process.env.SMTP_HOST': JSON.stringify(env.SMTP_HOST || process.env.SMTP_HOST),
+      'process.env.SMTP_PORT': JSON.stringify(env.SMTP_PORT || process.env.SMTP_PORT)
     }
   };
 });

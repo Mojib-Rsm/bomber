@@ -20,9 +20,10 @@ import {
   Download, 
   Upload, 
   Code, 
-  Cpu 
+  Cpu,
+  Settings
 } from 'lucide-react';
-import { collection, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { executeAttackNode } from '../services/attackEngine';
 
@@ -49,7 +50,7 @@ const Admin: React.FC<AdminProps> = ({
   onDeleteNode,
   onLogout 
 }) => {
-  const [activeTab, setActiveTab] = useState<'live' | 'gateways' | 'users' | 'logs' | 'engine'>('live');
+  const [activeTab, setActiveTab] = useState<'live' | 'gateways' | 'users' | 'logs' | 'engine' | 'settings'>('live');
   const [searchTerm, setSearchTerm] = useState('');
   
   // User Management State
@@ -63,6 +64,10 @@ const Admin: React.FC<AdminProps> = ({
   const [engineEnabled, setEngineEnabled] = useState(false);
   const [engineLogs, setEngineLogs] = useState<string[]>([]);
   const engineAbortController = useRef<AbortController | null>(null);
+
+  // Settings State
+  const [smsConfig, setSmsConfig] = useState({ apiKey: '', apiUrl: '' });
+  const [savingConfig, setSavingConfig] = useState(false);
 
   // API Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -107,6 +112,24 @@ const Admin: React.FC<AdminProps> = ({
           });
           return () => unsubscribe();
       }
+  }, [activeTab]);
+
+  // FETCH SMS CONFIG
+  useEffect(() => {
+    if (activeTab === 'settings' && db) {
+        const fetchConfig = async () => {
+            try {
+                const docRef = doc(db, "system_config", "sms");
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    setSmsConfig(docSnap.data() as any);
+                }
+            } catch (e) {
+                console.error("Error fetching config", e);
+            }
+        };
+        fetchConfig();
+    }
   }, [activeTab]);
 
   // SERVER ENGINE LOGIC
@@ -285,6 +308,20 @@ const Admin: React.FC<AdminProps> = ({
       }
   };
 
+  const handleSaveSmsConfig = async () => {
+    if (!db) return;
+    setSavingConfig(true);
+    try {
+        await setDoc(doc(db, "system_config", "sms"), smsConfig);
+        alert("SMS Configuration Saved!");
+    } catch(e) {
+        console.error(e);
+        alert("Failed to save config.");
+    } finally {
+        setSavingConfig(false);
+    }
+  };
+
   const activeCount = apiNodes.length - disabledNodes.length;
   const health = apiNodes.length > 0 ? Math.round((activeCount / apiNodes.length) * 100) : 0;
 
@@ -306,7 +343,7 @@ const Admin: React.FC<AdminProps> = ({
        </div>
 
        <div className="flex p-1 bg-zinc-900 rounded-lg border border-zinc-800 overflow-x-auto">
-           {(['live', 'engine', 'gateways', 'users', 'logs'] as const).map(tab => (
+           {(['live', 'engine', 'gateways', 'users', 'logs', 'settings'] as const).map(tab => (
                <button
                  key={tab}
                  onClick={() => { setActiveTab(tab); setSearchTerm(''); }}
@@ -319,6 +356,7 @@ const Admin: React.FC<AdminProps> = ({
                    {tab === 'gateways' && <Server className="w-3 h-3" />}
                    {tab === 'users' && <Users className="w-3 h-3" />}
                    {tab === 'logs' && <FileText className="w-3 h-3" />}
+                   {tab === 'settings' && <Settings className="w-3 h-3" />}
                    {tab}
                </button>
            ))}
@@ -592,6 +630,65 @@ const Admin: React.FC<AdminProps> = ({
                     </table>
                     {logs.length === 0 && <div className="p-8 text-center text-xs text-zinc-500">No logs recorded.</div>}
                </div>
+           </div>
+       )}
+       
+       {activeTab === 'settings' && (
+           <div className="space-y-6 animate-fade-in max-w-2xl mx-auto">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                    <div className="flex items-center gap-3 mb-6 border-b border-zinc-800 pb-4">
+                        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
+                            <Settings className="w-5 h-5 text-blue-500" />
+                        </div>
+                        <div>
+                            <h3 className="text-sm font-bold text-white">System Configuration</h3>
+                            <p className="text-xs text-zinc-500">Manage critical API credentials securely.</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                         <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">SMS API Key</label>
+                            <div className="relative">
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-black border border-zinc-800 rounded-lg p-3 text-xs text-white focus:border-blue-500 outline-none font-mono-code"
+                                    placeholder="Enter API Key"
+                                    value={smsConfig.apiKey}
+                                    onChange={e => setSmsConfig({...smsConfig, apiKey: e.target.value})}
+                                />
+                                {smsConfig.apiKey && <CheckCircle2 className="w-3 h-3 text-emerald-500 absolute right-3 top-3.5" />}
+                            </div>
+                         </div>
+
+                         <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">SMS API Endpoint URL</label>
+                            <div className="relative">
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-black border border-zinc-800 rounded-lg p-3 text-xs text-white focus:border-blue-500 outline-none font-mono-code"
+                                    placeholder="https://api.provider.com/send"
+                                    value={smsConfig.apiUrl}
+                                    onChange={e => setSmsConfig({...smsConfig, apiUrl: e.target.value})}
+                                />
+                                {smsConfig.apiUrl && <CheckCircle2 className="w-3 h-3 text-emerald-500 absolute right-3 top-3.5" />}
+                            </div>
+                         </div>
+                    </div>
+
+                    <div className="mt-8 flex justify-end">
+                        <button 
+                            onClick={handleSaveSmsConfig}
+                            disabled={savingConfig || !db}
+                            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center gap-2 disabled:opacity-50"
+                        >
+                            {savingConfig ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                            Save Configuration
+                        </button>
+                    </div>
+
+                    {!db && <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded text-center text-xs text-red-500">Database connection required to save settings.</div>}
+                </div>
            </div>
        )}
 
