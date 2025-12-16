@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppView } from '../types';
-import { ArrowLeft, Mail, Phone, Lock, ArrowRight, Loader2, ShieldAlert, CheckCircle2, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, Lock, ArrowRight, Loader2, ShieldAlert, CheckCircle2, MessageSquare, Timer, RefreshCw } from 'lucide-react';
 import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore"; 
 import { db } from '../firebase';
 import { sendSmsOtp, sendEmailOtp, generateOtp } from '../services/notificationService';
@@ -21,6 +21,20 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Timer State
+  const [timer, setTimer] = useState(0);
+
+  // Countdown Logic
+  useEffect(() => {
+    let interval: any;
+    if (timer > 0) {
+      interval = setInterval(() => {
+        setTimer((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [timer]);
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -31,7 +45,6 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
       if (!db) throw new Error("Database offline.");
 
       const usersRef = collection(db, "users");
-      // Search by email OR phone depending on input type
       const isEmailInput = inputValue.includes('@');
       const searchField = isEmailInput ? 'email' : 'phone';
       
@@ -43,47 +56,65 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
       const userData = snapshot.docs[0].data();
       setTargetUserId(snapshot.docs[0].id);
 
-      // Generate OTP
       const code = generateOtp();
       setGeneratedOtp(code);
 
-      // Logic: If user searched by Email, send to Email. If Phone, send to Phone.
       if (isEmailInput) {
           if (!userData.email) throw new Error("No email linked to this account.");
-          
           setMethod('email');
-          // Direct Email Sending (No Simulation)
           const success = await sendEmailOtp(userData.email, code);
-          
           if (success) {
               setSuccessMsg(`OTP sent to ${userData.email}`);
           } else {
-              // Fallback if SMTP is not configured in DB
-              console.warn("Email API failed. Falling back to alert.");
               alert(`[Falback Mode] Email failed. Your OTP is: ${code}`);
               setSuccessMsg(`[Falback] OTP shown in browser alert.`);
           }
       } else {
           if (!userData.phone) throw new Error("No phone number linked to this account.");
-          
           setMethod('phone');
           const success = await sendSmsOtp(userData.phone, code);
-          
           if (success) {
             setSuccessMsg(`OTP sent to phone ending in ${userData.phone.slice(-4)}`);
           } else {
-             // Fallback
              alert(`[Fallback Mode] SMS API Failed. Your OTP is: ${code}`);
              setSuccessMsg(`[Fallback] OTP shown in browser alert.`);
           }
       }
       
       setStep('verify');
+      setTimer(40); // Start Timer
 
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (timer > 0) return;
+    setLoading(true);
+    setError('');
+    
+    try {
+        // Generate NEW Unique Token
+        const newCode = generateOtp();
+        setGeneratedOtp(newCode);
+
+        // Resend based on method
+        if (method === 'email') {
+            await sendEmailOtp(inputValue, newCode);
+            alert(`New OTP sent to email.`);
+        } else {
+            await sendSmsOtp(inputValue, newCode);
+            alert(`New OTP sent to phone.`);
+        }
+
+        setTimer(40); // Reset Timer
+    } catch(err) {
+        setError("Failed to resend.");
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -178,6 +209,22 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
                   </div>
                   {error && <div className="text-xs text-red-500 text-center bg-red-500/10 p-2 rounded">{error}</div>}
                   <button type="submit" className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all">Verify OTP</button>
+                  
+                   {/* Resend Logic */}
+                   <div className="flex justify-center mt-2">
+                        <button 
+                            type="button"
+                            onClick={handleResendOtp}
+                            disabled={timer > 0 || loading}
+                            className={`py-2 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${timer > 0 ? 'text-zinc-500 cursor-not-allowed' : 'text-zinc-300 hover:text-white'}`}
+                        >
+                            {timer > 0 ? (
+                                <><Timer className="w-3 h-3" /> Resend in {timer}s</>
+                            ) : (
+                                <><RefreshCw className="w-3 h-3" /> Resend Code</>
+                            )}
+                        </button>
+                    </div>
               </form>
           )}
 

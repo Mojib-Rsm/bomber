@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppView, UserProfile } from '../types';
-import { UserPlus, User, Mail, ArrowRight, Loader2, Key, ShieldAlert, HardDrive, Phone, MessageSquare } from 'lucide-react';
+import { UserPlus, User, Mail, ArrowRight, Loader2, Key, ShieldAlert, HardDrive, Phone, MessageSquare, RefreshCw, Timer } from 'lucide-react';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from "firebase/firestore"; 
 import { db, isFirebaseConfigured } from '../firebase';
 import { sendSmsOtp, generateOtp } from '../services/notificationService';
@@ -18,7 +18,21 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
   const [generatedOtp, setGeneratedOtp] = useState('');
   const [error, setError] = useState('');
   
+  // Timer State
+  const [timer, setTimer] = useState(0);
+  
   const isDbReady = isFirebaseConfigured() && !!db;
+
+  // Countdown Logic
+  useEffect(() => {
+    let interval: any;
+    if (timer > 0) {
+      interval = setInterval(() => {
+        setTimer((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [timer]);
 
   const handleInitiateRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,31 +42,27 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
     try {
       if (!db) throw new Error("Database not connected.");
 
-      // 1. Check if email exists
       const usersRef = collection(db, "users");
       const emailQuery = query(usersRef, where("email", "==", formData.email));
       const emailSnap = await getDocs(emailQuery);
       if (!emailSnap.empty) throw new Error("Email already registered. Please login.");
 
-      // 2. Check if phone exists
       const phoneQuery = query(usersRef, where("phone", "==", formData.phone));
       const phoneSnap = await getDocs(phoneQuery);
       if (!phoneSnap.empty) throw new Error("Phone number already registered.");
 
-      // 3. Generate and Send OTP
       const code = generateOtp();
       setGeneratedOtp(code);
       
       const success = await sendSmsOtp(formData.phone, code);
-      
       console.log(`DEBUG MODE: OTP is ${code}`); 
       
       if (!success) {
-          // Fallback for demo/testing or if API fails
           alert(`[DEV MODE] SMS API Failed. Your OTP is: ${code}`);
       }
       
       setStep('otp');
+      setTimer(40); // Start 40s cooldown
 
     } catch (err: any) {
       console.error("Register Error:", err);
@@ -60,6 +70,33 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleResendOtp = async () => {
+      if (timer > 0) return;
+      
+      setError('');
+      setLoading(true);
+      try {
+          // Generate NEW Unique Token
+          const newCode = generateOtp();
+          setGeneratedOtp(newCode);
+
+          const success = await sendSmsOtp(formData.phone, newCode);
+          console.log(`DEBUG MODE: New OTP is ${newCode}`); 
+
+          if (success) {
+              alert(`OTP Resent to ${formData.phone}`);
+          } else {
+              alert(`[Fallback] OTP Resent: ${newCode}`);
+          }
+          
+          setTimer(40); // Reset Cooldown
+      } catch (err: any) {
+          setError("Failed to resend OTP");
+      } finally {
+          setLoading(false);
+      }
   };
 
   const handleVerifyAndRegister = async (e: React.FormEvent) => {
@@ -109,7 +146,6 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#09090b] text-white p-4 relative overflow-hidden">
-       {/* Background */}
        <div className="absolute inset-0 overflow-hidden">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[100px]"></div>
        </div>
@@ -230,13 +266,28 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
                     {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Confirm OTP <ArrowRight className="w-4 h-4" /></>}
                 </button>
                 
-                <button 
-                   type="button"
-                   onClick={() => setStep('details')}
-                   className="w-full py-2 text-xs text-zinc-500 hover:text-white"
-                >
-                    Go Back
-                </button>
+                {/* Resend Logic */}
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                    <button 
+                        type="button"
+                        onClick={handleResendOtp}
+                        disabled={timer > 0 || loading}
+                        className={`py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${timer > 0 ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-zinc-800 text-white hover:bg-zinc-700'}`}
+                    >
+                        {timer > 0 ? (
+                            <><Timer className="w-3 h-3" /> Wait {timer}s</>
+                        ) : (
+                            <><RefreshCw className="w-3 h-3" /> Resend OTP</>
+                        )}
+                    </button>
+                    <button 
+                    type="button"
+                    onClick={() => setStep('details')}
+                    className="py-2 text-xs text-zinc-500 hover:text-white border border-zinc-800 rounded-lg hover:border-zinc-700 transition-all"
+                    >
+                        Change Number
+                    </button>
+                </div>
             </form>
           )}
 
