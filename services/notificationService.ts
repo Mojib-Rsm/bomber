@@ -4,6 +4,7 @@ import { db } from '../firebase';
 // Defaults provided by user
 const DEFAULT_SMS_API_URL = "https://sms.anbuinfosec.dev/api/v1/sms/send";
 const DEFAULT_SMS_API_KEY = "anbu_sms_mgq589nm_9mgblyt069h";
+const CORS_PROXY = "https://corsproxy.io/?";
 
 const ENV_SMS_API_KEY = process.env.SMS_API_KEY;
 const ENV_SMS_API_URL = process.env.SMS_API_URL;
@@ -41,7 +42,10 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
 
     console.log("Sending SMS to:", phoneNumber, "via", apiUrl);
 
-    const response = await fetch(apiUrl, {
+    // Use CORS Proxy to bypass browser restrictions
+    const proxiedUrl = `${CORS_PROXY}${encodeURIComponent(apiUrl)}`;
+
+    const response = await fetch(proxiedUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -89,7 +93,6 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
     console.log(`Sending Email to ${email} using SMTP Host: ${config.smtpHost}`);
 
     // 2. Construct Payload for the Email API
-    // Note: Sending SMTP credentials in the body requires a secure (HTTPS) API endpoint.
     const payload = {
        host: config.smtpHost,
        port: config.smtpPort || 587,
@@ -108,8 +111,10 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
               </div>`
     };
 
-    // 3. Send Request
-    const response = await fetch(config.apiUrl, {
+    // 3. Send Request via Proxy
+    const proxiedUrl = `${CORS_PROXY}${encodeURIComponent(config.apiUrl)}`;
+
+    const response = await fetch(proxiedUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
