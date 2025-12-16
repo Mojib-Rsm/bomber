@@ -13,7 +13,6 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
   let apiUrl = ENV_SMS_API_URL || DEFAULT_SMS_API_URL;
 
   // 1. Try fetching from Firestore config if DB is connected
-  // This allows changing keys without redeploying the app
   if (db) {
     try {
         const configSnap = await getDoc(doc(db, "system_config", "sms"));
@@ -50,7 +49,6 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
       body: JSON.stringify(payload)
     });
 
-    // Check content type to safely parse JSON
     const contentType = response.headers.get("content-type");
     let data;
     if (contentType && contentType.indexOf("application/json") !== -1) {
@@ -60,10 +58,74 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
     }
     
     console.log("SMS API Response:", data);
-    
     return response.ok;
   } catch (error) {
     console.error("Failed to send SMS:", error);
+    return false;
+  }
+};
+
+export const sendEmailOtp = async (email: string, otp: string): Promise<boolean> => {
+  if (!db) {
+    console.error("Database not connected, cannot fetch SMTP config.");
+    return false;
+  }
+
+  try {
+    // 1. Fetch SMTP Config from Database
+    const configSnap = await getDoc(doc(db, "system_config", "email"));
+    if (!configSnap.exists()) {
+       console.error("SMTP Configuration missing in database (system_config/email).");
+       return false;
+    }
+
+    const config = configSnap.data();
+    // Validate required fields
+    if (!config.apiUrl || !config.smtpHost || !config.smtpUser || !config.smtpPass) {
+        console.error("Incomplete SMTP Configuration.");
+        return false;
+    }
+
+    console.log(`Sending Email to ${email} using SMTP Host: ${config.smtpHost}`);
+
+    // 2. Construct Payload for the Email API
+    // Note: Sending SMTP credentials in the body requires a secure (HTTPS) API endpoint.
+    const payload = {
+       host: config.smtpHost,
+       port: config.smtpPort || 587,
+       secure: config.secure || false,
+       user: config.smtpUser,
+       pass: config.smtpPass,
+       from: config.fromEmail || config.smtpUser,
+       to: email,
+       subject: "Your OFT Tools Verification Code",
+       text: `Your password reset code is: ${otp}`,
+       html: `<div style="font-family: sans-serif; padding: 20px;">
+                <h2>Verification Code</h2>
+                <p>Use the code below to reset your password:</p>
+                <h1 style="color: #ef4444; letter-spacing: 5px;">${otp}</h1>
+                <p>If you didn't request this, please ignore this email.</p>
+              </div>`
+    };
+
+    // 3. Send Request
+    const response = await fetch(config.apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        console.error("Email API Error:", errText);
+        return false;
+    }
+
+    console.log("Email sent successfully.");
+    return true;
+
+  } catch (error) {
+    console.error("Failed to send Email:", error);
     return false;
   }
 };

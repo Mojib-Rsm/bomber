@@ -3,7 +3,7 @@ import { AppView } from '../types';
 import { ArrowLeft, Mail, Phone, Lock, ArrowRight, Loader2, ShieldAlert, CheckCircle2, MessageSquare } from 'lucide-react';
 import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore"; 
 import { db } from '../firebase';
-import { sendSmsOtp, generateOtp } from '../services/notificationService';
+import { sendSmsOtp, sendEmailOtp, generateOtp } from '../services/notificationService';
 
 interface ForgotPasswordProps {
   onNavigate: (view: AppView) => void;
@@ -50,8 +50,21 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
       const code = generateOtp();
       setGeneratedOtp(code);
 
-      if (userData.phone) {
+      if (isEmailInput) {
+          // Send via Email (SMTP API)
+          setMethod('email');
+          const success = await sendEmailOtp(userData.email, code);
+          if (success) {
+              setSuccessMsg(`OTP sent to ${userData.email} via Email.`);
+          } else {
+              // Fallback
+              alert(`[DEV MODE] Email API Failed. Your OTP is: ${code}`);
+              setSuccessMsg(`[DEV MODE] OTP shown in alert.`);
+          }
+      } else {
           // Send via SMS
+          if (!userData.phone) throw new Error("No phone number linked to this account.");
+          
           setMethod('phone');
           const success = await sendSmsOtp(userData.phone, code);
           if (success) {
@@ -61,12 +74,6 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
              alert(`[DEV MODE] SMS API Failed. Your OTP is: ${code}`);
              setSuccessMsg(`[DEV MODE] OTP shown in alert.`);
           }
-      } else {
-          // Simulate Email Sending (Client-side restriction)
-          setMethod('email');
-          console.log(`[EMAIL SIMULATION] Sending OTP ${code} via SMTP...`);
-          alert(`[EMAIL SIMULATION] OTP is: ${code}`);
-          setSuccessMsg(`OTP sent to ${userData.email} (Check Console/Alert)`);
       }
       
       setStep('verify');
@@ -152,7 +159,7 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
               <form onSubmit={handleVerify} className="space-y-4 animate-fade-in">
                   <div className="text-center p-3 bg-zinc-800/50 rounded-lg border border-zinc-700">
                       <p className="text-xs text-zinc-300">{successMsg}</p>
-                      {method === 'email' && <p className="text-[10px] text-yellow-500 mt-1">*Check browser console if simulating</p>}
+                      {method === 'email' && <p className="text-[10px] text-zinc-500 mt-1">Check your inbox/spam folder.</p>}
                   </div>
 
                   <div className="space-y-1.5">
