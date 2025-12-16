@@ -36,7 +36,7 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
     const payload = {
       apiKey: apiKey,
       recipient: phoneNumber,
-      message: `Your OFT Tools Verification Code is: ${otp}`
+      message: `Your secure login code is: ${otp}`
     };
 
     // 2. Construct Proxied Request
@@ -82,7 +82,7 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
        pass: config.smtpPass,
        from: config.fromEmail || config.smtpUser,
        to: email,
-       subject: "Your OFT Tools Verification Code",
+       subject: "Verification Code",
        text: `Your password reset code is: ${otp}`,
        html: `<div style="font-family: sans-serif; padding: 20px;">
                 <h2>Verification Code</h2>
