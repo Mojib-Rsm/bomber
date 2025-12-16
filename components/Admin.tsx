@@ -549,7 +549,7 @@ const Admin: React.FC<AdminProps> = ({
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-zinc-500 uppercase">Proxy Gateway URL</label>
                                 <p className="text-[9px] text-zinc-600">
-                                    Define the CORS proxy used to route traffic. Defaults to <code>https://corsproxy.io/?</code> if empty.
+                                    Define the CORS proxy. <span className="text-white font-bold">Leave empty</span> to connect DIRECTLY to APIs (recommended if they support CORS).
                                 </p>
                                 <input 
                                     type="text" 

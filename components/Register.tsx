@@ -55,10 +55,11 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
       setGeneratedOtp(code);
       
       const success = await sendSmsOtp(formData.phone, code);
-      console.log(`DEBUG MODE: OTP is ${code}`); 
       
       if (!success) {
-          alert(`[DEV MODE] SMS API Failed. Your OTP is: ${code}`);
+          // In production, you might want to show a generic error, but for dev we alert
+          console.error("SMS Failed. Check Admin Config.");
+          throw new Error("Failed to send SMS. Contact Admin.");
       }
       
       setStep('otp');
@@ -83,12 +84,11 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
           setGeneratedOtp(newCode);
 
           const success = await sendSmsOtp(formData.phone, newCode);
-          console.log(`DEBUG MODE: New OTP is ${newCode}`); 
 
           if (success) {
               alert(`OTP Resent to ${formData.phone}`);
           } else {
-              alert(`[Fallback] OTP Resent: ${newCode}`);
+              throw new Error("Resend failed.");
           }
           
           setTimer(40); // Reset Cooldown

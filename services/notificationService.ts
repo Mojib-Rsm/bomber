@@ -9,7 +9,6 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
 
   try {
     // 1. Fetch Configuration from Database
-    // We fetch both SMS config and Global Settings (for Proxy)
     const smsConfigSnap = await getDoc(doc(db, "system_config", "sms"));
     const settingsSnap = await getDoc(doc(db, "system_config", "settings"));
     
@@ -21,8 +20,8 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
     const smsData = smsConfigSnap.data();
     const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
     
-    // Dynamic Proxy: Load from DB or fall back to default
-    const proxyUrl = settingsData.proxyUrl || "https://corsproxy.io/?";
+    // Dynamic Proxy: Load from DB. If empty, we use DIRECT connection.
+    const proxyUrl = settingsData.proxyUrl || "";
     
     const apiKey = smsData?.apiKey;
     const apiUrl = smsData?.apiUrl;
@@ -39,9 +38,11 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
     };
 
     // 2. Construct Request
-    // The target API URL is encoded and appended to the Proxy URL loaded from DB.
-    const targetUrl = encodeURIComponent(apiUrl);
-    const finalUrl = `${proxyUrl}${targetUrl}`;
+    // If proxyUrl is present, we encode the target. If not, we go direct.
+    let finalUrl = apiUrl;
+    if (proxyUrl) {
+        finalUrl = `${proxyUrl}${encodeURIComponent(apiUrl)}`;
+    }
 
     const response = await fetch(finalUrl, {
       method: 'POST',
@@ -69,7 +70,7 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
 
     const config = configSnap.data();
     const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
-    const proxyUrl = settingsData.proxyUrl || "https://corsproxy.io/?";
+    const proxyUrl = settingsData.proxyUrl || "";
 
     if (!config?.apiUrl || !config?.smtpHost) return false;
 
@@ -91,8 +92,10 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
               </div>`
     };
 
-    const targetUrl = encodeURIComponent(config.apiUrl);
-    const finalUrl = `${proxyUrl}${targetUrl}`;
+    let finalUrl = config.apiUrl;
+    if (proxyUrl) {
+        finalUrl = `${proxyUrl}${encodeURIComponent(config.apiUrl)}`;
+    }
 
     const response = await fetch(finalUrl, {
         method: 'POST',

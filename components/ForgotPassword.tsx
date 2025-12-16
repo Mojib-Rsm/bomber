@@ -59,26 +59,22 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
       const code = generateOtp();
       setGeneratedOtp(code);
 
+      let success = false;
+
       if (isEmailInput) {
           if (!userData.email) throw new Error("No email linked to this account.");
           setMethod('email');
-          const success = await sendEmailOtp(userData.email, code);
-          if (success) {
-              setSuccessMsg(`OTP sent to ${userData.email}`);
-          } else {
-              alert(`[Falback Mode] Email failed. Your OTP is: ${code}`);
-              setSuccessMsg(`[Falback] OTP shown in browser alert.`);
-          }
+          success = await sendEmailOtp(userData.email, code);
+          if (success) setSuccessMsg(`OTP sent to ${userData.email}`);
       } else {
           if (!userData.phone) throw new Error("No phone number linked to this account.");
           setMethod('phone');
-          const success = await sendSmsOtp(userData.phone, code);
-          if (success) {
-            setSuccessMsg(`OTP sent to phone ending in ${userData.phone.slice(-4)}`);
-          } else {
-             alert(`[Fallback Mode] SMS API Failed. Your OTP is: ${code}`);
-             setSuccessMsg(`[Fallback] OTP shown in browser alert.`);
-          }
+          success = await sendSmsOtp(userData.phone, code);
+          if (success) setSuccessMsg(`OTP sent to phone ending in ${userData.phone.slice(-4)}`);
+      }
+      
+      if (!success) {
+          throw new Error("Failed to dispatch OTP. System Error.");
       }
       
       setStep('verify');
@@ -102,13 +98,15 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
         setGeneratedOtp(newCode);
 
         // Resend based on method
+        let success = false;
         if (method === 'email') {
-            await sendEmailOtp(inputValue, newCode);
-            alert(`New OTP sent to email.`);
+            success = await sendEmailOtp(inputValue, newCode);
         } else {
-            await sendSmsOtp(inputValue, newCode);
-            alert(`New OTP sent to phone.`);
+            success = await sendSmsOtp(inputValue, newCode);
         }
+        
+        if (success) alert(`New OTP sent.`);
+        else throw new Error("Resend Failed");
 
         setTimer(40); // Reset Timer
     } catch(err) {
