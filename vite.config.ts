@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
+      // Only expose the Gemini API Key and Firebase Config
       'process.env.API_KEY': JSON.stringify(env.API_KEY || process.env.API_KEY),
       
       // Firebase
@@ -18,13 +19,8 @@ export default defineConfig(({ mode }) => {
       'process.env.FIREBASE_MESSAGING_SENDER_ID': JSON.stringify(env.FIREBASE_MESSAGING_SENDER_ID || process.env.FIREBASE_MESSAGING_SENDER_ID),
       'process.env.FIREBASE_APP_ID': JSON.stringify(env.FIREBASE_APP_ID || process.env.FIREBASE_APP_ID),
 
-      // SMS & Notification Services
-      'process.env.SMS_API_KEY': JSON.stringify(env.SMS_API_KEY || process.env.SMS_API_KEY),
-      'process.env.SMS_API_URL': JSON.stringify(env.SMS_API_URL || process.env.SMS_API_URL),
-      'process.env.SMTP_USER': JSON.stringify(env.SMTP_USER || process.env.SMTP_USER),
-      'process.env.SMTP_PASS': JSON.stringify(env.SMTP_PASS || process.env.SMTP_PASS),
-      'process.env.SMTP_HOST': JSON.stringify(env.SMTP_HOST || process.env.SMTP_HOST),
-      'process.env.SMTP_PORT': JSON.stringify(env.SMTP_PORT || process.env.SMTP_PORT)
+      // REMOVED: SMS_API_KEY, SMS_API_URL, and SMTP settings.
+      // These must NOT be in the source code. They are loaded from Firestore at runtime.
     }
   };
 });

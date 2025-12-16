@@ -22,7 +22,8 @@ import {
   Code, 
   Cpu,
   Settings,
-  Mail
+  Mail,
+  Globe
 } from 'lucide-react';
 import { collection, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -67,6 +68,7 @@ const Admin: React.FC<AdminProps> = ({
   const engineAbortController = useRef<AbortController | null>(null);
 
   // Settings State
+  const [globalSettings, setGlobalSettings] = useState({ proxyUrl: 'https://corsproxy.io/?' });
   const [smsConfig, setSmsConfig] = useState({ apiKey: '', apiUrl: '' });
   const [emailConfig, setEmailConfig] = useState({ 
       apiUrl: '', 
@@ -125,9 +127,13 @@ const Admin: React.FC<AdminProps> = ({
 
   // FETCH SYSTEM CONFIGS
   useEffect(() => {
-    if (activeTab === 'settings' && db) {
+    if ((activeTab === 'settings' || activeTab === 'engine') && db) {
         const fetchConfigs = async () => {
             try {
+                // Fetch Global Settings (Proxy)
+                const settingsDoc = await getDoc(doc(db, "system_config", "settings"));
+                if (settingsDoc.exists()) setGlobalSettings(settingsDoc.data() as any);
+
                 // Fetch SMS Config
                 const smsDoc = await getDoc(doc(db, "system_config", "sms"));
                 if (smsDoc.exists()) setSmsConfig(smsDoc.data() as any);
@@ -155,6 +161,7 @@ const Admin: React.FC<AdminProps> = ({
                 if (change.type === 'added') {
                     const session = { id: change.doc.id, ...change.doc.data() } as ActiveSession;
                     addEngineLog(`Job Found: ${session.target} (${session.amount})`);
+                    // Ensure we use the latest global settings
                     await processSession(session, addEngineLog);
                 }
             });
@@ -192,7 +199,8 @@ const Admin: React.FC<AdminProps> = ({
 
           const promises = activeApiNodes.map(async (node) => {
               try {
-                  const res = await executeAttackNode(node, session.target, controller.signal);
+                  // Pass the configured Proxy URL from settings to the execution engine
+                  const res = await executeAttackNode(node, session.target, controller.signal, globalSettings.proxyUrl);
                   if (res.ok) sent++; else failed++;
               } catch (e) { failed++; }
           });
@@ -323,6 +331,8 @@ const Admin: React.FC<AdminProps> = ({
     if (!db) return;
     setSavingConfig(true);
     try {
+        // Save Global Settings (Proxy)
+        await setDoc(doc(db, "system_config", "settings"), globalSettings);
         // Save SMS Config
         await setDoc(doc(db, "system_config", "sms"), smsConfig);
         // Save Email Config
@@ -531,6 +541,26 @@ const Admin: React.FC<AdminProps> = ({
                     </div>
 
                     <div className="space-y-6">
+                         {/* Global / Proxy Section */}
+                         <div className="space-y-4">
+                            <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-1 flex items-center gap-2">
+                                <Globe className="w-3 h-3" /> Network / Proxy Settings
+                            </h4>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-zinc-500 uppercase">Proxy Gateway URL</label>
+                                <p className="text-[9px] text-zinc-600">
+                                    Define the CORS proxy used to route traffic. Defaults to <code>https://corsproxy.io/?</code> if empty.
+                                </p>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-black border border-zinc-800 rounded-lg p-3 text-xs text-white focus:border-blue-500 outline-none font-mono-code" 
+                                    value={globalSettings.proxyUrl} 
+                                    onChange={e => setGlobalSettings({...globalSettings, proxyUrl: e.target.value})} 
+                                    placeholder="https://corsproxy.io/?"
+                                />
+                            </div>
+                         </div>
+
                          {/* SMS Section */}
                          <div className="space-y-4">
                             <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-1">SMS Configuration</h4>

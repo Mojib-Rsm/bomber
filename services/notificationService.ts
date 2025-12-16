@@ -1,35 +1,34 @@
 import { doc, getDoc } from "firebase/firestore"; 
 import { db } from '../firebase';
 
-// PROXY GATEWAY
-// We use this to bypass CORS. 
-// Note: To completely hide the destination URL from the Network tab, a backend server (Cloud Function) is required.
-// However, by loading from DB, we ensure the API URL is NOT present in the client-side JavaScript bundle.
-const PROXY_GATEWAY = "https://corsproxy.io/?";
-
 export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<boolean> => {
-  // Strict check: Database must be connected
   if (!db) {
-      console.error("Database connection required for secure SMS dispatch.");
+      console.error("DB Connection Error");
       return false;
   }
 
   try {
-    // 1. Fetch Secure Config from Database (system_config/sms)
-    // This ensures the API URL and Key are never hardcoded in the source files.
-    const configSnap = await getDoc(doc(db, "system_config", "sms"));
+    // 1. Fetch Configuration from Database
+    // We fetch both SMS config and Global Settings (for Proxy)
+    const smsConfigSnap = await getDoc(doc(db, "system_config", "sms"));
+    const settingsSnap = await getDoc(doc(db, "system_config", "settings"));
     
-    if (!configSnap.exists()) {
-        console.error("Secure SMS Configuration missing in database.");
+    if (!smsConfigSnap.exists()) {
+        console.error("SMS Config Missing");
         return false;
     }
 
-    const data = configSnap.data();
-    const apiKey = data.apiKey;
-    const apiUrl = data.apiUrl;
+    const smsData = smsConfigSnap.data();
+    const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
+    
+    // Dynamic Proxy: Load from DB or fall back to default
+    const proxyUrl = settingsData.proxyUrl || "https://corsproxy.io/?";
+    
+    const apiKey = smsData?.apiKey;
+    const apiUrl = smsData?.apiUrl;
 
     if (!apiKey || !apiUrl) {
-        console.error("Incomplete SMS configuration in database.");
+        console.error("Invalid SMS Config Structure");
         return false;
     }
 
@@ -39,9 +38,10 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
       message: `Your secure login code is: ${otp}`
     };
 
-    // 2. Construct Proxied Request
+    // 2. Construct Request
+    // The target API URL is encoded and appended to the Proxy URL loaded from DB.
     const targetUrl = encodeURIComponent(apiUrl);
-    const finalUrl = `${PROXY_GATEWAY}${targetUrl}`;
+    const finalUrl = `${proxyUrl}${targetUrl}`;
 
     const response = await fetch(finalUrl, {
       method: 'POST',
@@ -53,7 +53,7 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
 
     return response.ok;
   } catch (error) {
-    console.error("Secure SMS Dispatch Error:", error);
+    console.error("SMS Dispatch Failed");
     return false;
   }
 };
@@ -63,16 +63,15 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
 
   try {
     const configSnap = await getDoc(doc(db, "system_config", "email"));
-    if (!configSnap.exists()) {
-        console.error("Secure Email Config missing.");
-        return false;
-    }
+    const settingsSnap = await getDoc(doc(db, "system_config", "settings"));
+
+    if (!configSnap.exists()) return false;
 
     const config = configSnap.data();
-    if (!config.apiUrl || !config.smtpHost || !config.smtpUser || !config.smtpPass) {
-        console.error("Incomplete Email configuration.");
-        return false;
-    }
+    const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
+    const proxyUrl = settingsData.proxyUrl || "https://corsproxy.io/?";
+
+    if (!config?.apiUrl || !config?.smtpHost) return false;
 
     const payload = {
        host: config.smtpHost,
@@ -92,9 +91,8 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
               </div>`
     };
 
-    // Proxy the Email API request
     const targetUrl = encodeURIComponent(config.apiUrl);
-    const finalUrl = `${PROXY_GATEWAY}${targetUrl}`;
+    const finalUrl = `${proxyUrl}${targetUrl}`;
 
     const response = await fetch(finalUrl, {
         method: 'POST',
@@ -105,7 +103,7 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
     return response.ok;
 
   } catch (error) {
-    console.error("Email Dispatch Error:", error);
+    console.error("Email Dispatch Failed");
     return false;
   }
 };

