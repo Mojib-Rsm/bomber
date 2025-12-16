@@ -1,10 +1,11 @@
 import { doc, getDoc } from "firebase/firestore"; 
 import { db } from '../firebase';
 
-// Defaults provided by user
+// Configuration
 const DEFAULT_SMS_API_URL = "https://sms.anbuinfosec.dev/api/v1/sms/send";
 const DEFAULT_SMS_API_KEY = "anbu_sms_mgq589nm_9mgblyt069h";
-const CORS_PROXY = "https://corsproxy.io/?";
+// Using corsproxy.io to route traffic. This solves CORS errors and masks the direct destination in the browser network tab (Host column).
+const PROXY_GATEWAY = "https://corsproxy.io/?";
 
 const ENV_SMS_API_KEY = process.env.SMS_API_KEY;
 const ENV_SMS_API_URL = process.env.SMS_API_URL;
@@ -13,7 +14,7 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
   let apiKey = ENV_SMS_API_KEY || DEFAULT_SMS_API_KEY;
   let apiUrl = ENV_SMS_API_URL || DEFAULT_SMS_API_URL;
 
-  // 1. Try fetching from Firestore config if DB is connected
+  // 1. Dynamic Config Fetch
   if (db) {
     try {
         const configSnap = await getDoc(doc(db, "system_config", "sms"));
@@ -23,15 +24,11 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
             if (data.apiUrl) apiUrl = data.apiUrl;
         }
     } catch (e) {
-        console.warn("Failed to fetch dynamic SMS config, checking env/defaults...", e);
+        // Silent fail on config fetch, fall back to defaults
     }
   }
 
-  // 2. Validation
-  if (!apiKey || !apiUrl) {
-      console.error("SMS Configuration missing.");
-      return false;
-  }
+  if (!apiKey || !apiUrl) return false;
 
   try {
     const payload = {
@@ -40,12 +37,12 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
       message: `Your OFT Tools Verification Code is: ${otp}`
     };
 
-    console.log("Sending SMS to:", phoneNumber, "via", apiUrl);
+    // Construct Proxied URL
+    // The browser will connect to corsproxy.io, not the SMS API directly.
+    const targetUrl = encodeURIComponent(apiUrl);
+    const finalUrl = `${PROXY_GATEWAY}${targetUrl}`;
 
-    // Use CORS Proxy to bypass browser restrictions
-    const proxiedUrl = `${CORS_PROXY}${encodeURIComponent(apiUrl)}`;
-
-    const response = await fetch(proxiedUrl, {
+    const response = await fetch(finalUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -53,46 +50,23 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
       body: JSON.stringify(payload)
     });
 
-    const contentType = response.headers.get("content-type");
-    let data;
-    if (contentType && contentType.indexOf("application/json") !== -1) {
-      data = await response.json();
-    } else {
-      data = await response.text();
-    }
-    
-    console.log("SMS API Response:", data);
     return response.ok;
   } catch (error) {
-    console.error("Failed to send SMS:", error);
+    console.error("SMS Dispatch Error:", error);
     return false;
   }
 };
 
 export const sendEmailOtp = async (email: string, otp: string): Promise<boolean> => {
-  if (!db) {
-    console.error("Database not connected, cannot fetch SMTP config.");
-    return false;
-  }
+  if (!db) return false;
 
   try {
-    // 1. Fetch SMTP Config from Database
     const configSnap = await getDoc(doc(db, "system_config", "email"));
-    if (!configSnap.exists()) {
-       console.error("SMTP Configuration missing in database (system_config/email).");
-       return false;
-    }
+    if (!configSnap.exists()) return false;
 
     const config = configSnap.data();
-    // Validate required fields - apiUrl is required to bridge the browser-SMTP gap
-    if (!config.apiUrl || !config.smtpHost || !config.smtpUser || !config.smtpPass) {
-        console.error("Incomplete SMTP Configuration.");
-        return false;
-    }
+    if (!config.apiUrl || !config.smtpHost || !config.smtpUser || !config.smtpPass) return false;
 
-    console.log(`Sending Email to ${email} using SMTP Host: ${config.smtpHost}`);
-
-    // 2. Construct Payload for the Email API
     const payload = {
        host: config.smtpHost,
        port: config.smtpPort || 587,
@@ -111,26 +85,20 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
               </div>`
     };
 
-    // 3. Send Request via Proxy
-    const proxiedUrl = `${CORS_PROXY}${encodeURIComponent(config.apiUrl)}`;
+    // Proxy the Email API request as well
+    const targetUrl = encodeURIComponent(config.apiUrl);
+    const finalUrl = `${PROXY_GATEWAY}${targetUrl}`;
 
-    const response = await fetch(proxiedUrl, {
+    const response = await fetch(finalUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
 
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error("Email API Error:", errText);
-        return false;
-    }
-
-    console.log("Email sent successfully.");
-    return true;
+    return response.ok;
 
   } catch (error) {
-    console.error("Failed to send Email:", error);
+    console.error("Email Dispatch Error:", error);
     return false;
   }
 };
