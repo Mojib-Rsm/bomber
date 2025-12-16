@@ -80,7 +80,7 @@ export const sendEmailOtp = async (email: string, otp: string): Promise<boolean>
     }
 
     const config = configSnap.data();
-    // Validate required fields
+    // Validate required fields - apiUrl is required to bridge the browser-SMTP gap
     if (!config.apiUrl || !config.smtpHost || !config.smtpUser || !config.smtpPass) {
         console.error("Incomplete SMTP Configuration.");
         return false;

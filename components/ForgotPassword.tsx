@@ -17,7 +17,6 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
   const [newPassword, setNewPassword] = useState('');
   const [generatedOtp, setGeneratedOtp] = useState('');
   const [targetUserId, setTargetUserId] = useState('');
-  const [targetPhone, setTargetPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -33,7 +32,6 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
 
       const usersRef = collection(db, "users");
       // Search by email OR phone depending on input type
-      // Simple heuristic: if input contains '@', treat as email, else phone
       const isEmailInput = inputValue.includes('@');
       const searchField = isEmailInput ? 'email' : 'phone';
       
@@ -44,35 +42,39 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
 
       const userData = snapshot.docs[0].data();
       setTargetUserId(snapshot.docs[0].id);
-      setTargetPhone(userData.phone || '');
 
       // Generate OTP
       const code = generateOtp();
       setGeneratedOtp(code);
 
+      // Logic: If user searched by Email, send to Email. If Phone, send to Phone.
       if (isEmailInput) {
-          // Send via Email (SMTP API)
+          if (!userData.email) throw new Error("No email linked to this account.");
+          
           setMethod('email');
+          // Direct Email Sending (No Simulation)
           const success = await sendEmailOtp(userData.email, code);
+          
           if (success) {
-              setSuccessMsg(`OTP sent to ${userData.email} via Email.`);
+              setSuccessMsg(`OTP sent to ${userData.email}`);
           } else {
-              // Fallback
-              alert(`[DEV MODE] Email API Failed. Your OTP is: ${code}`);
-              setSuccessMsg(`[DEV MODE] OTP shown in alert.`);
+              // Fallback if SMTP is not configured in DB
+              console.warn("Email API failed. Falling back to alert.");
+              alert(`[Falback Mode] Email failed. Your OTP is: ${code}`);
+              setSuccessMsg(`[Falback] OTP shown in browser alert.`);
           }
       } else {
-          // Send via SMS
           if (!userData.phone) throw new Error("No phone number linked to this account.");
           
           setMethod('phone');
           const success = await sendSmsOtp(userData.phone, code);
+          
           if (success) {
-            setSuccessMsg(`OTP sent to registered phone ending in ${userData.phone.slice(-4)}`);
+            setSuccessMsg(`OTP sent to phone ending in ${userData.phone.slice(-4)}`);
           } else {
              // Fallback
-             alert(`[DEV MODE] SMS API Failed. Your OTP is: ${code}`);
-             setSuccessMsg(`[DEV MODE] OTP shown in alert.`);
+             alert(`[Fallback Mode] SMS API Failed. Your OTP is: ${code}`);
+             setSuccessMsg(`[Fallback] OTP shown in browser alert.`);
           }
       }
       
@@ -159,7 +161,7 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
               <form onSubmit={handleVerify} className="space-y-4 animate-fade-in">
                   <div className="text-center p-3 bg-zinc-800/50 rounded-lg border border-zinc-700">
                       <p className="text-xs text-zinc-300">{successMsg}</p>
-                      {method === 'email' && <p className="text-[10px] text-zinc-500 mt-1">Check your inbox/spam folder.</p>}
+                      {method === 'email' && <p className="text-[10px] text-zinc-500 mt-1">Check your inbox or spam folder.</p>}
                   </div>
 
                   <div className="space-y-1.5">
