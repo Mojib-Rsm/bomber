@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AppView } from '../types';
 import { Shield, Zap, Globe, ChevronRight, Terminal, Lock } from 'lucide-react';
 
@@ -21,7 +21,7 @@ const Landing: React.FC<LandingProps> = ({ onNavigate }) => {
             <div className="w-8 h-8 bg-emerald-500/10 rounded-lg border border-emerald-500/20 flex items-center justify-center">
                <Terminal className="w-5 h-5 text-emerald-500" />
             </div>
-            <span className="font-display font-bold text-xl tracking-wider">NETSTRIKE</span>
+            <span className="font-display font-bold text-xl tracking-wider">OFT TOOLS</span>
          </div>
          <button 
            onClick={() => onNavigate(AppView.LOGIN)}
@@ -34,7 +34,7 @@ const Landing: React.FC<LandingProps> = ({ onNavigate }) => {
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 text-center max-w-4xl mx-auto">
          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-mono-code mb-8 animate-fade-in">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            BOMBER ENGINE READY v2.5.0
+            BOMBER ENGINE READY v1.0
          </div>
 
          <h1 className="text-5xl md:text-7xl font-bold font-display tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-b from-white to-zinc-500">
@@ -83,7 +83,7 @@ const Landing: React.FC<LandingProps> = ({ onNavigate }) => {
 
       <footer className="relative z-10 p-6 border-t border-zinc-900 text-center">
          <p className="text-[10px] text-zinc-600 font-mono-code">
-            © 2024 NETSTRIKE. FOR EDUCATIONAL PURPOSES & FUN ONLY.
+            © 2024 OFT TOOLS. FOR EDUCATIONAL PURPOSES & FUN ONLY.
          </p>
       </footer>
     </div>

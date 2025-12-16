@@ -212,7 +212,7 @@ const Profile: React.FC<ProfileProps> = ({ logs, currentUser, onClearLogs, onNav
        </div>
        
        <div className="pt-8 text-center">
-          <p className="text-[10px] text-zinc-600 font-mono-code">NETSTRIKE v2.0.5 // TACTICAL BUILD</p>
+          <p className="text-[10px] text-zinc-600 font-mono-code">OFT Tools v1.0 // TACTICAL BUILD</p>
        </div>
     </div>
   );

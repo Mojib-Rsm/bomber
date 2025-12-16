@@ -90,7 +90,7 @@ const MainLayout = ({
           className="flex items-center gap-2 cursor-pointer group"
         >
             <div className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`}></div>
-            <h1 className="text-lg font-bold font-display tracking-wide text-white">NETSTRIKE <span className="text-[9px] text-zinc-600 font-mono-code align-top">CLOUD</span></h1>
+            <h1 className="text-lg font-bold font-display tracking-wide text-white">OFT TOOLS <span className="text-[9px] text-zinc-600 font-mono-code align-top">CLOUD</span></h1>
         </div>
         
         <div className="flex items-center gap-3">

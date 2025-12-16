@@ -117,7 +117,7 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
                 <Lock className="w-6 h-6 text-red-500" />
              </div>
              <h2 className="text-2xl font-bold font-display tracking-wide text-white">Reset Access</h2>
-             <p className="text-zinc-500 text-sm mt-2">Recover your NetStrike account.</p>
+             <p className="text-zinc-500 text-sm mt-2">Recover your OFT Tools account.</p>
           </div>
 
           {step === 'search' && (
@@ -130,7 +130,7 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
                             type="text" required value={inputValue}
                             onChange={e => setInputValue(e.target.value)}
                             className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-red-500 outline-none"
-                            placeholder="user@netstrike.io or +88017..."
+                            placeholder="user@oft.io or +88017..."
                         />
                     </div>
                   </div>

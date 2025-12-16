@@ -77,7 +77,7 @@ const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess }) => {
                 <Lock className="w-6 h-6 text-blue-500" />
              </div>
              <h2 className="text-2xl font-bold font-display tracking-wide text-white">Login</h2>
-             <p className="text-zinc-500 text-sm mt-2">Access your NetStrike console.</p>
+             <p className="text-zinc-500 text-sm mt-2">Access your OFT Tools console.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -91,7 +91,7 @@ const Login: React.FC<LoginProps> = ({ onNavigate, onLoginSuccess }) => {
                       value={formData.email}
                       onChange={e => setFormData({...formData, email: e.target.value})}
                       className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="user@netstrike.io"
+                      placeholder="user@oft-tools.io"
                   />
                 </div>
              </div>

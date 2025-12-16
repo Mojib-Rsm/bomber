@@ -118,7 +118,7 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
                 <UserPlus className="w-6 h-6 text-emerald-500" />
              </div>
              <h2 className="text-2xl font-bold font-display tracking-wide text-white">Register</h2>
-             <p className="text-zinc-500 text-sm mt-2">Join the NetStrike Network.</p>
+             <p className="text-zinc-500 text-sm mt-2">Join OFT Tools.</p>
           </div>
 
           {step === 'details' ? (
@@ -144,7 +144,7 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
                         type="email" required value={formData.email}
                         onChange={e => setFormData({...formData, email: e.target.value})}
                         className="w-full bg-black/50 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
-                        placeholder="admin@netstrike.local"
+                        placeholder="admin@oft.local"
                     />
                     </div>
                 </div>
@@ -239,7 +239,7 @@ const Register: React.FC<RegisterProps> = ({ onNavigate, onLoginSuccess }) => {
 
           <div className="mt-6 text-center">
              <p className="text-xs text-zinc-500">
-                Already have ID? <button onClick={() => onNavigate(AppView.LOGIN)} className="text-emerald-500 hover:text-emerald-400 font-bold underline underline-offset-4">Login Here</button>
+                already account? <button onClick={() => onNavigate(AppView.LOGIN)} className="text-emerald-500 hover:text-emerald-400 font-bold underline underline-offset-4">login please</button>
              </p>
           </div>
        </div>

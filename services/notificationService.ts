@@ -12,7 +12,7 @@ export const sendSmsOtp = async (phoneNumber: string, otp: string): Promise<bool
     const payload = {
       apiKey: SMS_API_KEY,
       recipient: phoneNumber,
-      message: `Your NetStrike Verification Code is: ${otp}`
+      message: `Your OFT Tools Verification Code is: ${otp}`
     };
 
     const response = await fetch(SMS_API_URL, {
