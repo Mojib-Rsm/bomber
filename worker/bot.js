@@ -63,10 +63,11 @@ async function processJob(sessionId, session) {
     const proxyUrl = settingsDoc.exists ? (settingsDoc.data().proxyUrl || "") : "";
 
     const nodesSnap = await db.collection("api_nodes").get();
-    const nodes = nodesSnap.docs.map(doc => doc.data());
+    // Filter nodes that are explicitly disabled
+    const nodes = nodesSnap.docs.map(doc => doc.data()).filter(n => n.enabled !== false);
 
     if (nodes.length === 0) {
-        console.log("⚠️ No API Nodes found. Stopping job.");
+        console.log("⚠️ No active API Nodes found. Stopping job.");
         await db.collection("active_sessions").doc(sessionId).update({ status: "stopped" });
         return;
     }

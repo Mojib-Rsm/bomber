@@ -30,6 +30,7 @@ export interface ApiNode {
   method: string;
   headers: string; // Stored as JSON string for easy editing
   body: string; // Template string with placeholders
+  enabled?: boolean;
 }
 
 export interface UserProfile {

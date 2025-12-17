@@ -361,7 +361,8 @@ function AppContent() {
     localStorage.setItem('netstrike_active_user', JSON.stringify(updatedUser));
   };
 
-  const activeNodes = apiNodes.filter(node => !disabledNodes.includes(node.name));
+  // Filter nodes based on enabled status OR disabled list (legacy local override)
+  const activeNodes = apiNodes.filter(node => node.enabled !== false && !disabledNodes.includes(node.name));
 
   return (
     <>
