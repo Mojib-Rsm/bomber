@@ -1,0 +1,13 @@
+{
+  "name": "oft-cloud-worker",
+  "version": "1.0.0",
+  "description": "Background worker for SMS Bombing engine",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}
