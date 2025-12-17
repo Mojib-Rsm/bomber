@@ -63,7 +63,8 @@ const Admin: React.FC<AdminProps> = ({
   const [liveSessions, setLiveSessions] = useState<ActiveSession[]>([]);
 
   // Server Engine State
-  const [engineEnabled, setEngineEnabled] = useState(false);
+  // CHANGED: Default is now TRUE (Always Active)
+  const [engineEnabled, setEngineEnabled] = useState(true);
   const [engineLogs, setEngineLogs] = useState<string[]>([]);
   const engineAbortController = useRef<AbortController | null>(null);
 
@@ -442,8 +443,17 @@ const Admin: React.FC<AdminProps> = ({
                     <Cpu className={`w-8 h-8 transition-colors ${engineEnabled ? 'text-emerald-500 animate-pulse' : 'text-zinc-600'}`} />
                  </div>
                  <h3 className="text-xl font-bold text-white">Cloud Execution Engine</h3>
-                 <button onClick={() => setEngineEnabled(!engineEnabled)} className={`px-8 py-3 rounded-xl font-bold uppercase text-sm ${engineEnabled ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-400'}`}>
-                    {engineEnabled ? 'Engine Online' : 'Start Engine'}
+                 {/* Auto-Active Status */}
+                 <div className="flex items-center justify-center gap-2">
+                     <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                     </span>
+                     <p className="text-xs text-emerald-500 font-mono-code">ENGINE ALWAYS ACTIVE</p>
+                 </div>
+                 
+                 <button onClick={() => setEngineEnabled(!engineEnabled)} className={`px-8 py-3 rounded-xl font-bold uppercase text-sm ${engineEnabled ? 'bg-zinc-800 text-zinc-500' : 'bg-emerald-600 text-white'}`}>
+                    {engineEnabled ? 'Disable Engine' : 'Start Engine Manually'}
                  </button>
               </div>
               <div className="bg-black border border-zinc-800 rounded-xl p-4 font-mono-code text-xs text-zinc-400 h-64 overflow-y-auto space-y-1">
